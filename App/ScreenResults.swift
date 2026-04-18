@@ -274,8 +274,8 @@ struct ScreenResults: View {
         let destination = await destinationItem
         
         // Update router coords to POI coords
-        router.originCoordinate = source.placemark.coordinate
-        router.destCoordinate = destination.placemark.coordinate
+        router.originCoordinate = source.location.coordinate
+        router.destCoordinate = destination.location.coordinate
 
         // 2. Request Transit Routes primarily
         let transitRoutes = await requestTransitRoutes(from: source, to: destination)
@@ -324,10 +324,17 @@ struct ScreenResults: View {
         
         // Fallback to coordinates if name search fails or is current location
         if let coord = coord {
-            return MKMapItem(placemark: MKPlacemark(coordinate: coord))
+            return mapItem(for: coord)
         }
         
-        return MKMapItem(placemark: MKPlacemark(coordinate: cdmxFallbackOrigin))
+        return mapItem(for: cdmxFallbackOrigin)
+    }
+
+    private func mapItem(for coordinate: CLLocationCoordinate2D) -> MKMapItem {
+        MKMapItem(
+            location: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude),
+            address: nil
+        )
     }
 
     private func requestTransitRoutes(from source: MKMapItem, to destination: MKMapItem) async -> [MKRoute] {

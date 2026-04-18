@@ -77,8 +77,8 @@ final class LocationManager: NSObject {
             self.searchResults = response.mapItems.map { item in
                 AddressResult(
                     title: item.name ?? "Sin nombre",
-                    subtitle: item.placemark.title ?? "",
-                    coordinate: item.placemark.coordinate,
+                    subtitle: item.address?.shortAddress ?? item.address?.fullAddress ?? "",
+                    coordinate: item.location.coordinate,
                     mapItem: item
                 )
             }

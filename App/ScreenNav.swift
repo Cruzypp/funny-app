@@ -14,6 +14,7 @@ struct ScreenNav: View {
     @State private var pulseScale: CGFloat = 1.0
     @State private var showSOSOptions = false
     @State private var currentStepIndex = 0
+    @State private var routeStepCount = 0
     @State private var progressTimer: Timer?
     @State private var cameraPosition: MapCameraPosition = .region(
         MKCoordinateRegion(
@@ -122,6 +123,7 @@ struct ScreenNav: View {
         }
         .ignoresSafeArea(edges: .bottom)
         .onAppear {
+            routeStepCount = router.selectedRoute?.steps.count ?? 0
             startProgress()
             router.location.startTracking()
             Task {
@@ -403,9 +405,9 @@ struct ScreenNav: View {
             }
             progress = min(1.0, progress + 0.001)
             // Update current step
-            if let route = router.selectedRoute, !route.steps.isEmpty {
-                let stepIdx = Int(progress * Double(route.steps.count))
-                currentStepIndex = min(stepIdx, route.steps.count - 1)
+            if routeStepCount > 0 {
+                let stepIdx = Int(progress * Double(routeStepCount))
+                currentStepIndex = min(stepIdx, routeStepCount - 1)
             }
         }
     }
