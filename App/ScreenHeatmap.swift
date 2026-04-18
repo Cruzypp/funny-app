@@ -26,7 +26,7 @@ struct ScreenHeatmap: View {
                 onBack: { router.go(.home) }
             )
 
-            ScrollView {
+            GeometryReader { proxy in
                 VStack(spacing: 0) {
                     HeatmapMapSection(
                         night: night,
@@ -35,16 +35,15 @@ struct ScreenHeatmap: View {
                         coverageLabel: "\(store.snapshot.reports.count.formatted()) rep · \(zones.count.formatted()) zonas",
                         cameraPosition: $cameraPosition
                     )
+                    .frame(height: max(360, proxy.size.height - 50))
+
                     HeatmapTimeFilters(
                         night: night,
                         timeFilter: $timeFilter
                     )
-                    .padding(.bottom, 28)
+                    .padding(.bottom, 6)
                 }
-            }
-            .scrollIndicators(.hidden)
-            .refreshable {
-                await store.load()
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             }
         }
         .background(T.bg(night))
@@ -102,8 +101,8 @@ private struct HeatmapHeader: View {
             trailing: AnyView(counter)
         )
         .padding(.horizontal, 16)
-        .padding(.top, 50)
-        .padding(.bottom, 8)
+        .padding(.top, 42)
+        .padding(.bottom, 6)
         .background(T.bg(night))
     }
 
@@ -161,7 +160,7 @@ private struct HeatmapMapSection: View {
                 MapUserLocationButton()
                 MapCompass()
             }
-            .frame(height: 520)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             .onChange(of: zoneSignature) { _, _ in
                 withAnimation(.easeInOut(duration: 0.25)) {
                     cameraPosition = .region(Self.region(for: zones))
@@ -353,7 +352,7 @@ private struct HeatmapTimeFilters: View {
             }
         }
         .padding(.horizontal, 16)
-        .padding(.top, 12)
+        .padding(.top, 8)
     }
 }
 
