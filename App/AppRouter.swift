@@ -49,8 +49,17 @@ final class AppRouter {
     var night: Bool = false
     var vocab: SafetyVocab = .colors
     let location = LocationManager()
+    
+    var contacts: [TrustedContact] = [
+        .init(name: "Mamá", phone: "5512345678", color: Color(hex: "E07856")),
+        .init(name: "Sofía", phone: "5587654321", color: Color(hex: "2E7D5B"))
+    ]
 
     func go(_ s: AppScreen) {
         screen = s
+    }
+    
+    func addContact(_ contact: TrustedContact) {
+        contacts.append(contact)
     }
 }

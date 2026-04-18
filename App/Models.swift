@@ -80,8 +80,10 @@ struct RouteSegment {
 }
 
 // MARK: - Home screen models
-struct TrustedContact {
+struct TrustedContact: Identifiable {
+    var id = UUID()
     var name: String
+    var phone: String
     var color: Color
 }
 
