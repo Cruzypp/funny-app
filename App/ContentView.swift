@@ -43,6 +43,7 @@ struct ContentView: View {
             .animation(.easeInOut(duration: 0.26), value: router.screen)
         }
         .environment(router)
+        .navigationBarHidden(true)
         // Vocab switcher — long-press anywhere outside interactive areas to cycle
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {

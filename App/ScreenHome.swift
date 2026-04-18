@@ -1,8 +1,10 @@
 import SwiftUI
+import CoreLocation
 
 struct ScreenHome: View {
     @Environment(AppRouter.self) var router
     @State private var query = ""
+    @State private var showResults = false
 
     private let contacts: [TrustedContact] = [
         .init(name: "Mamá",  color: Color(hex: "E07856")),
@@ -18,6 +20,7 @@ struct ScreenHome: View {
     ]
 
     private var night: Bool { router.night }
+    private var location: LocationManager { router.location }
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -25,6 +28,12 @@ struct ScreenHome: View {
                 VStack(alignment: .leading, spacing: 0) {
                     headerSection
                     searchCard
+
+                    // Search results dropdown
+                    if showResults && !location.searchResults.isEmpty {
+                        searchResultsList
+                    }
+
                     locateButton
                     contactsSection
                     recentsSection
@@ -38,6 +47,7 @@ struct ScreenHome: View {
                 LinearGradient(colors: [T.bg(night).opacity(0), T.bg(night)],
                                startPoint: .top, endPoint: .bottom)
                     .frame(height: 36)
+                    .allowsHitTesting(false)
                 CaminosButton(label: "Buscar ruta segura", icon: "shield.fill") {
                     router.go(.results(dest: query.isEmpty ? "Cafebrería El Péndulo" : query))
                 }
@@ -45,55 +55,55 @@ struct ScreenHome: View {
                 .padding(.bottom, 38)
                 .background(T.bg(night))
             }
+
+            // Heatmap button — fuera del ScrollView para evitar conflictos de gestos
+            VStack {
+                HStack {
+                    Spacer()
+                    Button { router.go(.heatmap) } label: {
+                        Image(systemName: "map.fill")
+                            .font(.system(size: 20, weight: .semibold))
+                            .foregroundStyle(T.pri(night))
+                            .frame(width: 50, height: 50)
+                            .background(T.surface(night), in: Circle())
+                            .caminosCard(hi: true)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.trailing, 20)
+                    .padding(.top, 80)
+                }
+                Spacer()
+            }
         }
         .background(T.bg(night))
         .ignoresSafeArea(edges: .bottom)
+        .onAppear {
+            location.requestPermission()
+        }
+        .onChange(of: query) { _, newValue in
+            showResults = !newValue.isEmpty
+            Task {
+                try? await Task.sleep(for: .milliseconds(300))
+                // Only search if query hasn't changed since sleep
+                if query == newValue {
+                    await location.search(query: newValue)
+                }
+            }
+        }
     }
 
     // MARK: Header
     private var headerSection: some View {
-        VStack(alignment: .leading, spacing: 28) {
-            HStack {
-                // Avatar
-                ZStack {
-                    Circle()
-                        .fill(night ? Color(hex: "2B3446") : T.ink)
-                        .frame(width: 40, height: 40)
-                    Text("c")
-                        .font(.serif(20))
-                        .foregroundStyle(night ? T.accent : T.cream)
-                }
-
-                Spacer()
-
-                // Mode pill
-                HStack(spacing: 6) {
-                    Image(systemName: night ? "moon.fill" : "sun.max.fill")
-                        .font(.system(size: 13))
-                        .foregroundStyle(night ? T.accent : T.textSecondary)
-                    Text(night ? "Modo noche · 22:48" : "Tarde · 18:12")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(T.sec(night))
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(night ? Color.white.opacity(0.06) : Color.black.opacity(0.04),
-                            in: Capsule())
-            }
-
-            // Headline
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Hola, Ana.")
-                    .font(.serif(42))
-                    .foregroundStyle(T.pri(night))
-                Text("¿a dónde vas?")
-                    .font(.serif(42, italic: true))
-                    .foregroundStyle(T.sec(night))
-            }
-            .lineSpacing(2)
+        VStack(alignment: .leading, spacing: 2) {
+            Text("Hola, Ana.")
+                .font(.serif(42))
+                .foregroundStyle(T.pri(night))
+            Text("¿a dónde vas?")
+                .font(.serif(42, italic: true))
+                .foregroundStyle(T.sec(night))
         }
         .padding(.horizontal, 20)
-        .padding(.top, 72)
+        .padding(.top, 80)
         .padding(.bottom, 20)
     }
 
@@ -107,7 +117,9 @@ struct ScreenHome: View {
                     Text("DESDE")
                         .font(.mono(10)).tracking(0.4)
                         .foregroundStyle(T.sec(night))
-                    Text("Mi ubicación · Roma Sur")
+                    Text(location.isAuthorized
+                         ? "Mi ubicación actual"
+                         : "Mi ubicación · Roma Sur")
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(T.pri(night))
                 }
@@ -128,7 +140,6 @@ struct ScreenHome: View {
 
             // Destination row
             HStack(spacing: 12) {
-                // Accent diamond
                 Image(systemName: "diamond.fill")
                     .font(.system(size: 10))
                     .foregroundStyle(T.accent)
@@ -142,6 +153,25 @@ struct ScreenHome: View {
                         .font(.system(size: 16, weight: .medium))
                         .foregroundStyle(T.pri(night))
                         .tint(T.accent)
+                        .submitLabel(.search)
+                        .onSubmit {
+                            if !query.isEmpty {
+                                router.go(.results(dest: query))
+                            }
+                        }
+                }
+
+                // Clear button
+                if !query.isEmpty {
+                    Button {
+                        query = ""
+                        location.clearSearch()
+                        showResults = false
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(T.sec(night))
+                    }
+                    .buttonStyle(.plain)
                 }
             }
             .padding(.horizontal, 4)
@@ -153,17 +183,94 @@ struct ScreenHome: View {
         .padding(.horizontal, 16)
     }
 
+    // MARK: Search results list
+    private var searchResultsList: some View {
+        VStack(spacing: 0) {
+            if location.isSearching {
+                HStack {
+                    ProgressView().tint(T.sec(night))
+                    Text("Buscando…")
+                        .font(.system(size: 14))
+                        .foregroundStyle(T.sec(night))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16)
+                .background(T.surface(night), in: RoundedRectangle(cornerRadius: T.r4))
+                .padding(.horizontal, 16)
+                .padding(.top, 6)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(Array(location.searchResults.enumerated()), id: \.element.id) { i, result in
+                        Button {
+                            query = result.title
+                            showResults = false
+                            location.clearSearch()
+                            router.go(.results(dest: result.title))
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "mappin.circle.fill")
+                                    .font(.system(size: 20))
+                                    .foregroundStyle(T.accent)
+                                    .frame(width: 32)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(result.title)
+                                        .font(.system(size: 15, weight: .medium))
+                                        .foregroundStyle(T.pri(night))
+                                        .lineLimit(1)
+                                    Text(result.subtitle)
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(T.sec(night))
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                            }
+                            .padding(.vertical, 12)
+                            .padding(.horizontal, 16)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+
+                        if i < location.searchResults.count - 1 {
+                            Divider()
+                                .padding(.leading, 60)
+                                .padding(.trailing, 16)
+                        }
+                    }
+                }
+                .background(T.surface(night), in: RoundedRectangle(cornerRadius: T.r4))
+                .caminosCard()
+                .padding(.horizontal, 16)
+                .padding(.top, 6)
+            }
+        }
+    }
+
     // MARK: Locate button
     private var locateButton: some View {
         Button {
-            // locate action
+            if let loc = location.userLocation {
+                // Reverse-geocode and set as destination
+                let geocoder = CLGeocoder()
+                Task {
+                    if let placemarks = try? await geocoder.reverseGeocodeLocation(loc),
+                       let name = placemarks.first?.name ?? placemarks.first?.locality {
+                        query = name
+                        router.go(.results(dest: name))
+                    }
+                }
+            } else {
+                location.requestPermission()
+            }
         } label: {
             HStack(spacing: 8) {
-                Image(systemName: "location.fill").font(.system(size: 15))
-                Text("Usar mi ubicación como destino")
+                Image(systemName: location.isAuthorized ? "location.fill" : "location")
+                    .font(.system(size: 15))
+                Text(location.isAuthorized
+                     ? "Usar mi ubicación como destino"
+                     : "Activar ubicación")
                     .font(.system(size: 14, weight: .medium))
             }
-            .foregroundStyle(T.sec(night))
+            .foregroundStyle(location.isAuthorized ? T.accent : T.sec(night))
             .frame(maxWidth: .infinity)
             .frame(height: 48)
         }

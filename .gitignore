@@ -1,0 +1,30 @@
+# Xcode
+#
+build/
+DerivedData/
+*.hmap
+*.ipa
+*.playground
+
+# User settings
+xcuserdata/
+
+# Swift Package Manager
+#
+.build/
+Packages/
+Package.pins
+Package.resolved
+.swiftpm/xcode/package.xcworkspace/contents.xcworkspacedata
+.swiftpm/xcode/xcuserdata/
+
+# Firebase & Google (CRITICAL)
+GoogleService-Info.plist
+
+# Local configs
+.env
+.claude/
+.DS_Store
+
+# Crashlytics
+com_apple_xcode_dsym_extraction_tool_completed_check

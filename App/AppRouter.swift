@@ -46,10 +46,11 @@ enum AppScreen: Equatable {
 @Observable
 final class AppRouter {
     var screen: AppScreen = .home
-    var night: Bool = true
+    var night: Bool = false
     var vocab: SafetyVocab = .colors
+    let location = LocationManager()
 
     func go(_ s: AppScreen) {
-        withAnimation(.easeInOut(duration: 0.26)) { screen = s }
+        screen = s
     }
 }

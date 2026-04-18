@@ -1,62 +1,35 @@
 import SwiftUI
+import MapKit
 
+// MARK: - Main screen
 struct ScreenHeatmap: View {
     @Environment(AppRouter.self) var router
-
-    @State private var timeFilter = "night"
-    @State private var modeFilter = "all"
+    @State private var timeFilter: TimeFilter = .night
+    @State private var modeFilter: ModeFilter = .all
+    @State private var cameraPosition: MapCameraPosition = .region(
+        MKCoordinateRegion(
+            center: CLLocationCoordinate2D(latitude: 19.4300, longitude: -99.1332),
+            span: MKCoordinateSpan(latitudeDelta: 0.10, longitudeDelta: 0.10)
+        )
+    )
 
     private var night: Bool { router.night }
 
-    private let heatmapData: [String: [HeatmapBlob]] = [
-        "morning": [
-            .init(center: CGPoint(x: 90,  y: 180), radius: 55, level: .high,   opacity: 0.35),
-            .init(center: CGPoint(x: 220, y: 300), radius: 60, level: .high,   opacity: 0.30),
-            .init(center: CGPoint(x: 310, y: 120), radius: 45, level: .medium, opacity: 0.30),
-        ],
-        "afternoon": [
-            .init(center: CGPoint(x: 90,  y: 180), radius: 55, level: .high,   opacity: 0.30),
-            .init(center: CGPoint(x: 220, y: 300), radius: 60, level: .high,   opacity: 0.35),
-            .init(center: CGPoint(x: 310, y: 120), radius: 45, level: .medium, opacity: 0.35),
-            .init(center: CGPoint(x: 160, y: 420), radius: 40, level: .medium, opacity: 0.30),
-        ],
-        "night": [
-            .init(center: CGPoint(x: 90,  y: 180), radius: 55, level: .medium, opacity: 0.40),
-            .init(center: CGPoint(x: 220, y: 300), radius: 70, level: .low,    opacity: 0.45),
-            .init(center: CGPoint(x: 310, y: 120), radius: 50, level: .low,    opacity: 0.40),
-            .init(center: CGPoint(x: 160, y: 420), radius: 45, level: .low,    opacity: 0.40),
-            .init(center: CGPoint(x: 280, y: 250), radius: 40, level: .medium, opacity: 0.35),
-        ],
-    ]
-
     var body: some View {
         VStack(spacing: 0) {
-            // Sticky header
-            ScreenHeader(supertitle: "Comunidad", title: "Mapa de zonas", night: night,
-                         onBack: { router.go(.home) },
-                         trailing: AnyView(
-                            Text("2,089 reportes")
-                                .font(.mono(11)).tracking(0.3)
-                                .foregroundStyle(T.sec(night))
-                                .padding(.horizontal, 10).padding(.vertical, 6)
-                                .background(night ? Color.white.opacity(0.06) : Color.black.opacity(0.05),
-                                            in: Capsule())
-                         ))
-            .padding(.horizontal, 16)
-            .padding(.top, 58)
-            .padding(.bottom, 12)
-            .background(T.bg(night))
+            HeatmapHeader(night: night, onBack: { router.go(.home) })
 
             ScrollView {
                 VStack(spacing: 0) {
-                    // Map with heatmap
-                    mapSection
-
-                    // Filters
-                    filtersSection
-
-                    // Insight card
-                    insightCard
+                    HeatmapMapSection(
+                        night: night,
+                        timeFilter: timeFilter,
+                        cameraPosition: $cameraPosition
+                    )
+                    HeatmapFilters(night: night,
+                                   timeFilter: $timeFilter,
+                                   modeFilter: $modeFilter)
+                    HeatmapInsightCard(night: night)
                         .padding(.horizontal, 16)
                         .padding(.top, 16)
                         .padding(.bottom, 40)
@@ -66,115 +39,253 @@ struct ScreenHeatmap: View {
         }
         .background(T.bg(night))
     }
+}
 
-    // MARK: Map
-    private var mapSection: some View {
-        ZStack(alignment: .bottomLeading) {
-            CDMXMap(
-                designHeight: 460,
-                night: night,
-                heatmap: heatmapData[timeFilter]
-            )
+// MARK: - Filter enums
+enum TimeFilter: String, CaseIterable {
+    case morning   = "morning"
+    case afternoon = "afternoon"
+    case night     = "night"
 
-            // Legend overlay
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Percepción")
-                    .font(.mono(10)).tracking(0.5)
-                    .foregroundStyle(T.sec(night))
-                    .textCase(.uppercase)
-
-                ForEach([("Segura", T.safe), ("Media", T.warn), ("Riesgo", T.risk)], id: \.0) { item in
-                    HStack(spacing: 8) {
-                        Circle().fill(item.1).opacity(0.85).frame(width: 12, height: 12)
-                        Text(item.0)
-                            .font(.system(size: 12))
-                            .foregroundStyle(T.pri(night))
-                    }
-                }
-            }
-            .padding(12)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
-            .caminosCard()
-            .padding(.leading, 14)
-            .padding(.bottom, 14)
-        }
+    var label: String {
+        switch self { case .morning: "6–12h"; case .afternoon: "12–19h"; case .night: "19–6h" }
+    }
+    var icon: String {
+        switch self { case .morning, .afternoon: "sun.max.fill"; case .night: "moon.fill" }
     }
 
-    // MARK: Filters
-    private var filtersSection: some View {
+    // Real CDMX neighborhood coordinates with radius in meters
+    var zones: [HeatZone] {
+        switch self {
+        case .morning:
+            return [
+                .init(center: CLLocationCoordinate2D(latitude: 19.4450, longitude: -99.1240), radius: 600, level: .high,   opacity: 0.35),  // Tepito
+                .init(center: CLLocationCoordinate2D(latitude: 19.4220, longitude: -99.1200), radius: 700, level: .high,   opacity: 0.30),  // La Merced
+                .init(center: CLLocationCoordinate2D(latitude: 19.4320, longitude: -99.1470), radius: 500, level: .medium, opacity: 0.30),  // Guerrero
+            ]
+        case .afternoon:
+            return [
+                .init(center: CLLocationCoordinate2D(latitude: 19.4450, longitude: -99.1240), radius: 600, level: .high,   opacity: 0.30),
+                .init(center: CLLocationCoordinate2D(latitude: 19.4220, longitude: -99.1200), radius: 700, level: .high,   opacity: 0.35),
+                .init(center: CLLocationCoordinate2D(latitude: 19.4320, longitude: -99.1470), radius: 500, level: .medium, opacity: 0.35),
+                .init(center: CLLocationCoordinate2D(latitude: 19.4150, longitude: -99.1480), radius: 450, level: .medium, opacity: 0.30),  // Doctores
+            ]
+        case .night:
+            return [
+                .init(center: CLLocationCoordinate2D(latitude: 19.4450, longitude: -99.1240), radius: 700, level: .low,    opacity: 0.45),
+                .init(center: CLLocationCoordinate2D(latitude: 19.4220, longitude: -99.1200), radius: 800, level: .low,    opacity: 0.50),
+                .init(center: CLLocationCoordinate2D(latitude: 19.4320, longitude: -99.1470), radius: 550, level: .medium, opacity: 0.40),
+                .init(center: CLLocationCoordinate2D(latitude: 19.4150, longitude: -99.1480), radius: 500, level: .low,    opacity: 0.40),  // Doctores
+                .init(center: CLLocationCoordinate2D(latitude: 19.4100, longitude: -99.1650), radius: 400, level: .medium, opacity: 0.35),  // Roma/Condesa
+            ]
+        }
+    }
+}
+
+struct HeatZone: Identifiable {
+    let id = UUID()
+    let center: CLLocationCoordinate2D
+    let radius: CLLocationDistance
+    let level: SafetyLevel
+    let opacity: Double
+
+    var color: Color {
+        switch level {
+        case .high:   return T.safe
+        case .medium: return T.warn
+        case .low:    return T.risk
+        }
+    }
+}
+
+enum ModeFilter: String, CaseIterable {
+    case all, walk, metro, bus
+    var label: String {
+        switch self { case .all: "Todos"; case .walk: "Caminar"; case .metro: "Metro"; case .bus: "Bus" }
+    }
+    var icon: String? {
+        switch self { case .all: nil; case .walk: "figure.walk"; case .metro: "tram.fill"; case .bus: "bus.fill" }
+    }
+}
+
+// MARK: - Header
+private struct HeatmapHeader: View {
+    var night: Bool
+    var onBack: () -> Void
+
+    var body: some View {
+        ScreenHeader(
+            supertitle: "Comunidad",
+            title: "Mapa de zonas",
+            night: night,
+            onBack: onBack,
+            trailing: AnyView(
+                Text("2,089 reportes")
+                    .font(.mono(11)).tracking(0.3)
+                    .foregroundStyle(T.sec(night))
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(night ? Color.white.opacity(0.06) : Color.black.opacity(0.05),
+                                in: Capsule())
+            )
+        )
+        .padding(.horizontal, 16)
+        .padding(.top, 58)
+        .padding(.bottom, 12)
+        .background(T.bg(night))
+    }
+}
+
+// MARK: - Map + legend
+private struct HeatmapMapSection: View {
+    var night: Bool
+    var timeFilter: TimeFilter
+    @Binding var cameraPosition: MapCameraPosition
+
+    var body: some View {
+        ZStack(alignment: .bottomLeading) {
+            Map(position: $cameraPosition) {
+                ForEach(timeFilter.zones) { zone in
+                    MapCircle(center: zone.center, radius: zone.radius)
+                        .foregroundStyle(zone.color.opacity(zone.opacity))
+                        .stroke(zone.color.opacity(zone.opacity + 0.15), lineWidth: 1)
+                }
+                UserAnnotation()
+            }
+            .mapStyle(night
+                ? .standard(pointsOfInterest: .excludingAll)
+                : .standard(pointsOfInterest: .excludingAll)
+            )
+            .mapControls {
+                MapUserLocationButton()
+                MapCompass()
+            }
+            .frame(height: 360)
+
+            HeatmapLegend(night: night)
+                .padding(.leading, 14)
+                .padding(.bottom, 14)
+        }
+    }
+}
+
+private struct HeatmapLegend: View {
+    var night: Bool
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Percepción")
+                .font(.mono(10)).tracking(0.5)
+                .foregroundStyle(T.sec(night))
+                .textCase(.uppercase)
+            legendRow("Segura", color: T.safe)
+            legendRow("Media",  color: T.warn)
+            legendRow("Riesgo", color: T.risk)
+        }
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+        .caminosCard()
+    }
+
+    private func legendRow(_ label: String, color: Color) -> some View {
+        HStack(spacing: 8) {
+            Circle().fill(color).opacity(0.85).frame(width: 12, height: 12)
+            Text(label).font(.system(size: 12)).foregroundStyle(T.pri(night))
+        }
+    }
+}
+
+// MARK: - Filters
+private struct HeatmapFilters: View {
+    var night: Bool
+    @Binding var timeFilter: TimeFilter
+    @Binding var modeFilter: ModeFilter
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            // Time of day
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Hora del día")
-                    .font(.mono(11)).tracking(1)
-                    .foregroundStyle(T.sec(night))
-                    .textCase(.uppercase)
-
-                HStack(spacing: 8) {
-                    ForEach([
-                        ("morning",   "6–12h",   "sun.max.fill"),
-                        ("afternoon", "12–19h",  "sun.max.fill"),
-                        ("night",     "19–6h",   "moon.fill"),
-                    ], id: \.0) { id, label, icon in
-                        let on = timeFilter == id
-                        Button { withAnimation(.easeInOut(duration: 0.2)) { timeFilter = id } } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: icon).font(.system(size: 13))
-                                Text(label).font(.system(size: 13, weight: .medium))
-                            }
-                            .foregroundStyle(on ? T.bg(night) : T.pri(night))
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 54)
-                            .background(on ? T.pri(night) : (night ? Color.white.opacity(0.04) : Color.black.opacity(0.04)),
-                                        in: RoundedRectangle(cornerRadius: 16))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-
-            // Transport mode
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Transporte")
-                    .font(.mono(11)).tracking(1)
-                    .foregroundStyle(T.sec(night))
-                    .textCase(.uppercase)
-
-                HStack(spacing: 8) {
-                    ForEach([
-                        ("all",   "Todos",   nil as String?),
-                        ("walk",  "Caminar", "figure.walk"),
-                        ("metro", "Metro",   "tram.fill"),
-                        ("bus",   "Bus",     "bus.fill"),
-                    ], id: \.0) { id, label, icon in
-                        let on = modeFilter == id
-                        Button { withAnimation(.easeInOut(duration: 0.2)) { modeFilter = id } } label: {
-                            HStack(spacing: 4) {
-                                if let icon { Image(systemName: icon).font(.system(size: 12)) }
-                                Text(label).font(.system(size: 12, weight: .medium))
-                            }
-                            .foregroundStyle(on ? T.bg(night) : T.pri(night))
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 44)
-                            .overlay(
-                                Capsule().stroke(
-                                    on ? Color.clear : (night ? Color.white.opacity(0.10) : Color.black.opacity(0.14)),
-                                    lineWidth: 1.5
-                                )
-                            )
-                            .background(on ? T.pri(night) : Color.clear, in: Capsule())
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
+            filterLabel("Hora del día")
+            timeButtons
         }
         .padding(.horizontal, 20)
         .padding(.top, 20)
     }
 
-    // MARK: Insight card
-    private var insightCard: some View {
+    private func filterLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.mono(11)).tracking(1)
+            .foregroundStyle(T.sec(night))
+            .textCase(.uppercase)
+    }
+
+    private var timeButtons: some View {
+        HStack(spacing: 8) {
+            ForEach(TimeFilter.allCases, id: \.rawValue) { f in
+                TimeFilterButton(filter: f, selected: timeFilter, night: night) {
+                    withAnimation(.easeInOut(duration: 0.2)) { timeFilter = f }
+                }
+            }
+        }
+    }
+}
+
+private struct TimeFilterButton: View {
+    var filter: TimeFilter
+    var selected: TimeFilter
+    var night: Bool
+    var action: () -> Void
+
+    private var on: Bool { filter == selected }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: filter.icon).font(.system(size: 13))
+                Text(filter.label).font(.system(size: 13, weight: .medium))
+            }
+            .foregroundStyle(on ? T.bg(night) : T.pri(night))
+            .frame(maxWidth: .infinity)
+            .frame(height: 54)
+            .background(on ? T.pri(night) : (night ? Color.white.opacity(0.04) : Color.black.opacity(0.04)),
+                        in: RoundedRectangle(cornerRadius: 16))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct ModeFilterButton: View {
+    var filter: ModeFilter
+    var selected: ModeFilter
+    var night: Bool
+    var action: () -> Void
+
+    private var on: Bool { filter == selected }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                if let icon = filter.icon {
+                    Image(systemName: icon).font(.system(size: 12))
+                }
+                Text(filter.label).font(.system(size: 12, weight: .medium))
+            }
+            .foregroundStyle(on ? T.bg(night) : T.pri(night))
+            .frame(maxWidth: .infinity)
+            .frame(height: 44)
+            .background(on ? T.pri(night) : Color.clear, in: Capsule())
+            .overlay(
+                Capsule().stroke(
+                    on ? Color.clear : (night ? Color.white.opacity(0.10) : Color.black.opacity(0.14)),
+                    lineWidth: 1.5
+                )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Insight card
+private struct HeatmapInsightCard: View {
+    var night: Bool
+
+    var body: some View {
         HStack(alignment: .top, spacing: 12) {
             RoundedRectangle(cornerRadius: 10)
                 .fill(T.warnTint)
@@ -209,6 +320,5 @@ struct ScreenHeatmap: View {
 }
 
 #Preview {
-    let r = AppRouter()
-    return ScreenHeatmap().environment(r)
+    ScreenHeatmap().environment(AppRouter())
 }
