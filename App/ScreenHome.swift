@@ -1,18 +1,19 @@
 import SwiftUI
-import CoreLocation
 
 struct ScreenHome: View {
     @Environment(AppRouter.self) var router
-    @State private var query = ""
-    @State private var showResults = false
+    @State private var destQuery = ""
+    @State private var originQuery = ""
+    @State private var editingOrigin = false
+    @State private var showDestResults = false
+    @State private var showOriginResults = false
     @State private var showContactPicker = false
+    @FocusState private var focusedField: SearchField?
 
-    private let recents: [RecentDestination] = [
-        .init(sfSymbol: "house.fill",      title: "Casa",              subtitle: "Col. Roma Norte",    safety: .high),
-        .init(sfSymbol: "briefcase.fill",  title: "Oficina",           subtitle: "Av. Reforma 222",    safety: .high),
-        .init(sfSymbol: "clock",           title: "Gimnasio Condesa",  subtitle: "Michoacán 78",       safety: .medium),
-        .init(sfSymbol: "clock",           title: "Casa de Ana",       subtitle: "Col. Del Valle",     safety: .medium),
-    ]
+    private enum SearchField: Hashable {
+        case origin
+        case destination
+    }
 
     private var night: Bool { router.night }
     private var location: LocationManager { router.location }
@@ -24,34 +25,38 @@ struct ScreenHome: View {
                     headerSection
                     searchCard
 
-                    // Search results dropdown
-                    if showResults && !location.searchResults.isEmpty {
-                        searchResultsList
+                    if showOriginResults && !location.searchResults.isEmpty {
+                        searchResultsList(forOrigin: true)
                     }
 
-                    locateButton
+                    if showDestResults && !location.searchResults.isEmpty {
+                        searchResultsList(forOrigin: false)
+                    }
+
                     contactsSection
-                    recentsSection
                     Color.clear.frame(height: 110)
                 }
             }
             .scrollIndicators(.hidden)
+            .scrollDismissesKeyboard(.interactively)
 
-            // Sticky CTA
             VStack(spacing: 0) {
-                LinearGradient(colors: [T.bg(night).opacity(0), T.bg(night)],
-                               startPoint: .top, endPoint: .bottom)
-                    .frame(height: 36)
-                    .allowsHitTesting(false)
+                LinearGradient(
+                    colors: [T.bg(night).opacity(0), T.bg(night)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 36)
+                .allowsHitTesting(false)
+
                 CaminosButton(label: "Buscar ruta segura", icon: "shield.fill") {
-                    router.go(.results(dest: query.isEmpty ? "Cafebrería El Péndulo" : query))
+                    searchDestination(fallback: "Parque México")
                 }
                 .padding(.horizontal, 16)
                 .padding(.bottom, 38)
                 .background(T.bg(night))
             }
 
-            // Heatmap button — fuera del ScrollView para evitar conflictos de gestos
             VStack {
                 HStack {
                     Spacer()
@@ -72,30 +77,56 @@ struct ScreenHome: View {
         }
         .background(T.bg(night))
         .ignoresSafeArea(edges: .bottom)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Listo") { dismissKeyboard() }
+                    .foregroundStyle(T.accent)
+            }
+        }
+        .onTapGesture { dismissKeyboard() }
         .onAppear {
             location.requestPermission()
         }
+        .task {
+            await router.loadContacts()
+        }
         .sheet(isPresented: $showContactPicker) {
             ContactPicker { newContact in
-                router.addContact(newContact)
+                Task {
+                    await router.addContact(newContact)
+                }
             }
         }
-        .onChange(of: query) { _, newValue in
-            showResults = !newValue.isEmpty
-            Task {
-                try? await Task.sleep(for: .milliseconds(300))
-                // Only search if query hasn't changed since sleep
-                if query == newValue {
-                    await location.search(query: newValue)
-                }
+        .onChange(of: destQuery) { _, newValue in
+            guard !editingOrigin else { return }
+            showDestResults = !newValue.isEmpty
+            showOriginResults = false
+            debounceSearch(query: newValue)
+        }
+        .onChange(of: originQuery) { _, newValue in
+            guard editingOrigin else { return }
+            showOriginResults = !newValue.isEmpty
+            showDestResults = false
+            debounceSearch(query: newValue)
+        }
+        .onChange(of: editingOrigin) { _, isEditing in
+            focusedField = isEditing ? .origin : nil
+        }
+    }
+
+    private func debounceSearch(query: String) {
+        Task {
+            try? await Task.sleep(for: .milliseconds(300))
+            if editingOrigin ? (originQuery == query) : (destQuery == query) {
+                await location.search(query: query)
             }
         }
     }
 
-    // MARK: Header
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("Hola, Ana.")
+            Text("Hola.")
                 .font(.serif(42))
                 .foregroundStyle(T.pri(night))
             Text("¿a dónde vas?")
@@ -107,38 +138,80 @@ struct ScreenHome: View {
         .padding(.bottom, 20)
     }
 
-    // MARK: Search card
     private var searchCard: some View {
         VStack(spacing: 0) {
-            // Origin row
             HStack(spacing: 12) {
                 Circle().fill(T.pri(night)).frame(width: 10, height: 10)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("DESDE")
-                        .font(.mono(10)).tracking(0.4)
-                        .foregroundStyle(T.sec(night))
-                    Text(location.isAuthorized
-                         ? "Mi ubicación actual"
-                         : "Mi ubicación · Roma Sur")
+
+                if editingOrigin {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("DESDE")
+                            .font(.mono(10)).tracking(0.4)
+                            .foregroundStyle(T.sec(night))
+                        TextField(
+                            "",
+                            text: $originQuery,
+                            prompt: Text("Buscar origen")
+                                .foregroundStyle(T.pri(night).opacity(0.42))
+                        )
                         .font(.system(size: 15, weight: .medium))
                         .foregroundStyle(T.pri(night))
+                        .tint(T.accent)
+                        .focused($focusedField, equals: .origin)
+                        .submitLabel(.done)
+                        .textInputAutocapitalization(.words)
+                        .autocorrectionDisabled()
+                        .onSubmit { dismissKeyboard() }
+                    }
+
+                    Button {
+                        router.originCoordinate = nil
+                        router.originName = "Mi ubicación actual"
+                        editingOrigin = false
+                        originQuery = ""
+                        dismissKeyboard()
+                    } label: {
+                        Image(systemName: "location.fill")
+                            .font(.system(size: 14))
+                            .foregroundStyle(T.accent)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    Button {
+                        editingOrigin = true
+                        showDestResults = false
+                        clearSearchResults()
+                    } label: {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("DESDE")
+                                .font(.mono(10)).tracking(0.4)
+                                .foregroundStyle(T.sec(night))
+                            HStack(spacing: 6) {
+                                Text(router.originName)
+                                    .font(.system(size: 17, weight: .medium))
+                                    .foregroundStyle(T.pri(night))
+                                if router.originCoordinate == nil && location.isAuthorized {
+                                    Image(systemName: "location.fill")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(T.safe)
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+
+                    Image(systemName: "pencil")
+                        .font(.system(size: 13))
+                        .foregroundStyle(T.sec(night).opacity(0.5))
                 }
             }
             .padding(.horizontal, 4)
 
-            // Connector dots
-            VStack(spacing: 3) {
-                ForEach(0..<3, id: \.self) { _ in
-                    Circle().fill(T.sec(night)).frame(width: 2, height: 2)
-                }
-            }
-            .padding(.leading, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 4)
+            Divider()
+                .background(T.line(night))
+                .padding(.top, 14)
 
-            Divider().background(T.line(night))
-
-            // Destination row
             HStack(spacing: 12) {
                 Image(systemName: "diamond.fill")
                     .font(.system(size: 10))
@@ -149,24 +222,36 @@ struct ScreenHome: View {
                     Text("A DÓNDE")
                         .font(.mono(10)).tracking(0.4)
                         .foregroundStyle(T.sec(night))
-                    TextField("Buscar dirección, lugar o contacto", text: $query)
-                        .font(.system(size: 16, weight: .medium))
-                        .foregroundStyle(T.pri(night))
-                        .tint(T.accent)
-                        .submitLabel(.search)
-                        .onSubmit {
-                            if !query.isEmpty {
-                                router.go(.results(dest: query))
-                            }
+                    TextField(
+                        "",
+                        text: $destQuery,
+                        prompt: Text("Buscar dirección, lugar o colonia")
+                            .foregroundStyle(T.pri(night).opacity(0.48))
+                    )
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(T.pri(night))
+                    .tint(T.accent)
+                    .focused($focusedField, equals: .destination)
+                    .submitLabel(.search)
+                    .textInputAutocapitalization(.words)
+                    .autocorrectionDisabled()
+                    .onSubmit { searchDestination() }
+                    .onTapGesture {
+                        if editingOrigin {
+                            editingOrigin = false
+                            originQuery = ""
+                            clearSearchResults()
                         }
+                        focusedField = .destination
+                    }
                 }
 
-                // Clear button
-                if !query.isEmpty {
+                if !destQuery.isEmpty {
                     Button {
-                        query = ""
-                        location.clearSearch()
-                        showResults = false
+                        destQuery = ""
+                        router.destCoordinate = nil
+                        router.destName = ""
+                        clearSearchResults()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(T.sec(night))
@@ -183,9 +268,8 @@ struct ScreenHome: View {
         .padding(.horizontal, 16)
     }
 
-    // MARK: Search results list
-    private var searchResultsList: some View {
-        VStack(spacing: 0) {
+    private func searchResultsList(forOrigin: Bool) -> some View {
+        Group {
             if location.isSearching {
                 HStack {
                     ProgressView().tint(T.sec(night))
@@ -202,15 +286,12 @@ struct ScreenHome: View {
                 VStack(spacing: 0) {
                     ForEach(Array(location.searchResults.enumerated()), id: \.element.id) { i, result in
                         Button {
-                            query = result.title
-                            showResults = false
-                            location.clearSearch()
-                            router.go(.results(dest: result.title))
+                            applySelection(result, forOrigin: forOrigin)
                         } label: {
                             HStack(spacing: 12) {
-                                Image(systemName: "mappin.circle.fill")
+                                Image(systemName: forOrigin ? "circle.fill" : "mappin.circle.fill")
                                     .font(.system(size: 20))
-                                    .foregroundStyle(T.accent)
+                                    .foregroundStyle(forOrigin ? T.pri(night) : T.accent)
                                     .frame(width: 32)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(result.title)
@@ -245,41 +326,6 @@ struct ScreenHome: View {
         }
     }
 
-    // MARK: Locate button
-    private var locateButton: some View {
-        Button {
-            if let loc = location.userLocation {
-                // Reverse-geocode and set as destination
-                let geocoder = CLGeocoder()
-                Task {
-                    if let placemarks = try? await geocoder.reverseGeocodeLocation(loc),
-                       let name = placemarks.first?.name ?? placemarks.first?.locality {
-                        query = name
-                        router.go(.results(dest: name))
-                    }
-                }
-            } else {
-                location.requestPermission()
-            }
-        } label: {
-            HStack(spacing: 8) {
-                Image(systemName: location.isAuthorized ? "location.fill" : "location")
-                    .font(.system(size: 15))
-                Text(location.isAuthorized
-                     ? "Usar mi ubicación como destino"
-                     : "Activar ubicación")
-                    .font(.system(size: 14, weight: .medium))
-            }
-            .foregroundStyle(location.isAuthorized ? T.accent : T.sec(night))
-            .frame(maxWidth: .infinity)
-            .frame(height: 48)
-        }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 16)
-        .padding(.top, 6)
-    }
-
-    // MARK: Trusted contacts
     private var contactsSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
@@ -289,45 +335,74 @@ struct ScreenHome: View {
                     .textCase(.uppercase)
                     .tracking(1)
                 Spacer()
-                Text("3 activos")
+                Text("\(router.contacts.count) activos")
                     .font(.system(size: 12))
                     .foregroundStyle(T.sec(night))
             }
 
             HStack(spacing: 10) {
-                ForEach(router.contacts) { c in
-                    ZStack(alignment: .bottomTrailing) {
+                if router.contacts.isEmpty {
+                    Button {
+                        showContactPicker = true
+                    } label: {
+                        HStack(spacing: 12) {
+                            Circle()
+                                .stroke(T.line(night), lineWidth: 1.5)
+                                .frame(width: 52, height: 52)
+                                .overlay(
+                                    Image(systemName: "plus")
+                                        .font(.system(size: 16, weight: .medium))
+                                        .foregroundStyle(T.sec(night))
+                                )
+
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Agregar contacto")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(T.pri(night))
+                                Text("Elige a alguien desde tu agenda.")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(T.sec(night))
+                            }
+
+                            Spacer()
+                        }
+                        .padding(.trailing, 8)
+                    }
+                    .buttonStyle(.plain)
+                } else {
+                    ForEach(router.contacts) { c in
+                        ZStack(alignment: .bottomTrailing) {
+                            Circle()
+                                .fill(c.color)
+                                .frame(width: 52, height: 52)
+                                .overlay(
+                                    Text(String(c.name.prefix(1)))
+                                        .font(.system(size: 18, weight: .semibold))
+                                        .foregroundStyle(.white)
+                                )
+
+                            Circle()
+                                .fill(T.safe)
+                                .frame(width: 16, height: 16)
+                                .overlay(Circle().stroke(T.bg(night), lineWidth: 2.5))
+                                .offset(x: 2, y: 2)
+                        }
+                    }
+
+                    Button {
+                        showContactPicker = true
+                    } label: {
                         Circle()
-                            .fill(c.color)
+                            .stroke(T.line(night), lineWidth: 1.5)
                             .frame(width: 52, height: 52)
                             .overlay(
-                                Text(String(c.name.prefix(1)))
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundStyle(.white)
+                                Image(systemName: "plus")
+                                    .font(.system(size: 16, weight: .medium))
+                                    .foregroundStyle(T.sec(night))
                             )
-
-                        Circle()
-                            .fill(T.safe)
-                            .frame(width: 16, height: 16)
-                            .overlay(Circle().stroke(T.bg(night), lineWidth: 2.5))
-                            .offset(x: 2, y: 2)
                     }
+                    .buttonStyle(.plain)
                 }
-
-                // Add button
-                Button {
-                    showContactPicker = true
-                } label: {
-                    Circle()
-                        .stroke(T.line(night), lineWidth: 1.5)
-                        .frame(width: 52, height: 52)
-                        .overlay(
-                            Image(systemName: "plus")
-                                .font(.system(size: 16, weight: .medium))
-                                .foregroundStyle(T.sec(night))
-                        )
-                }
-                .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, 20)
@@ -335,50 +410,49 @@ struct ScreenHome: View {
         .padding(.bottom, 6)
     }
 
-    // MARK: Recent destinations
-    private var recentsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Destinos recientes")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(T.sec(night))
-                .textCase(.uppercase)
-                .tracking(1)
-                .padding(.horizontal, 20)
+    private func clearSearchResults() {
+        location.clearSearch()
+        showOriginResults = false
+        showDestResults = false
+    }
 
-            ForEach(recents) { r in
-                Button {
-                    router.go(.results(dest: r.title))
-                } label: {
-                    HStack(spacing: 14) {
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(night ? Color.white.opacity(0.06) : Color.black.opacity(0.04))
-                            .frame(width: 40, height: 40)
-                            .overlay(
-                                Image(systemName: r.sfSymbol)
-                                    .font(.system(size: 16))
-                                    .foregroundStyle(T.pri(night))
-                            )
+    private func dismissKeyboard() {
+        focusedField = nil
+        clearSearchResults()
 
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(r.title)
-                                .font(.system(size: 15, weight: .medium))
-                                .foregroundStyle(T.pri(night))
-                            Text(r.subtitle)
-                                .font(.system(size: 13))
-                                .foregroundStyle(T.sec(night))
-                        }
-                        Spacer()
-                        SafetyBadge(level: r.safety, vocab: router.vocab, size: .sm)
-                    }
-                    .padding(.vertical, 14)
-                    .padding(.horizontal, 12)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .padding(.horizontal, 16)
-            }
+        if editingOrigin && originQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            editingOrigin = false
         }
-        .padding(.top, 20)
+    }
+
+    private func applySelection(_ result: AddressResult, forOrigin: Bool) {
+        if forOrigin {
+            router.originName = result.title
+            router.originCoordinate = result.coordinate
+            router.originMapItem = result.mapItem
+            editingOrigin = false
+            originQuery = ""
+        } else {
+            destQuery = result.title
+            router.destName = result.title
+            router.destCoordinate = result.coordinate
+            router.destMapItem = result.mapItem
+            router.go(.results(dest: result.title))
+        }
+
+        dismissKeyboard()
+    }
+
+    private func searchDestination(fallback: String? = nil) {
+        let trimmed = destQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        let finalDestination = trimmed.isEmpty ? fallback : trimmed
+
+        guard let finalDestination else { return }
+
+        destQuery = finalDestination
+        router.destName = finalDestination
+        dismissKeyboard()
+        router.go(.results(dest: finalDestination))
     }
 }
 

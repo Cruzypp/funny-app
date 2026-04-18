@@ -3,51 +3,61 @@ import SwiftUI
 struct ScreenImpact: View {
     @Environment(AppRouter.self) var router
 
-    @State private var displayedScore: Int = 62
+    @State private var displayedScore = 0
     @State private var checkScale: CGFloat = 0.3
     @State private var checkOpacity: Double = 0
 
-    private let oldScore = 62
-    private let newScore = 71
     private var night: Bool { router.night }
+    private var summary: RouteImpactSummary? { router.lastImpactSummary }
+
+    private var scoreDelta: Int {
+        guard let summary else { return 0 }
+        return summary.currentAverage - summary.previousAverage
+    }
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            ScrollView {
-                ZStack(alignment: .top) {
-                    // Ambient top glow
-                    RadialGradient(
-                        colors: [T.safe.opacity(0.13), Color.clear],
-                        center: .top, startRadius: 0, endRadius: 300
-                    )
-                    .frame(height: 420)
-                    .frame(maxWidth: .infinity)
+            if let summary {
+                ScrollView {
+                    ZStack(alignment: .top) {
+                        RadialGradient(
+                            colors: [T.safe.opacity(0.13), Color.clear],
+                            center: .top,
+                            startRadius: 0,
+                            endRadius: 300
+                        )
+                        .frame(height: 420)
+                        .frame(maxWidth: .infinity)
 
-                    VStack(spacing: 0) {
-                        heroSection
-                        scoreCard
-                            .padding(.horizontal, 16)
-                            .padding(.top, 36)
-                        statsRow
-                            .padding(.horizontal, 16)
-                            .padding(.top, 18)
-                        ctaSection
-                            .padding(.horizontal, 16)
-                            .padding(.top, 24)
-                        Color.clear.frame(height: 60)
+                        VStack(spacing: 0) {
+                            heroSection(summary: summary)
+                            scoreCard(summary: summary)
+                                .padding(.horizontal, 16)
+                                .padding(.top, 36)
+                            statsRow(summary: summary)
+                                .padding(.horizontal, 16)
+                                .padding(.top, 18)
+                            highlightsCard(summary: summary)
+                                .padding(.horizontal, 16)
+                                .padding(.top, 18)
+                            ctaSection
+                                .padding(.horizontal, 16)
+                                .padding(.top, 24)
+                            Color.clear.frame(height: 60)
+                        }
                     }
                 }
+                .scrollIndicators(.hidden)
+            } else {
+                emptyState
             }
-            .scrollIndicators(.hidden)
         }
         .background(T.bg(night))
         .onAppear { runAnimations() }
     }
 
-    // MARK: Hero
-    private var heroSection: some View {
+    private func heroSection(summary: RouteImpactSummary) -> some View {
         VStack(spacing: 28) {
-            // Check circle with pop animation
             ZStack {
                 Circle()
                     .fill(T.safe.opacity(0.08))
@@ -68,40 +78,47 @@ struct ScreenImpact: View {
             .opacity(checkOpacity)
 
             VStack(spacing: 10) {
-                Text("Gracias, Ana.")
-                    .font(.serif(36))
+                Text("Reporte guardado.")
+                    .font(.serif(34))
                     .foregroundStyle(T.pri(night))
-                Text("tu reporte ayuda.")
-                    .font(.serif(36, italic: true))
+                Text(summary.routeTitle)
+                    .font(.serif(30, italic: true))
                     .foregroundStyle(T.sec(night))
+                    .multilineTextAlignment(.center)
             }
-            .multilineTextAlignment(.center)
 
-            Text("Ayudaste a **1,247 personas** que van a caminar esta ruta.")
+            Text(heroCopy(summary: summary))
                 .font(.system(size: 15))
                 .foregroundStyle(T.sec(night))
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 40)
+                .padding(.horizontal, 34)
         }
         .padding(.top, 100)
     }
 
-    // MARK: Score change card
-    private var scoreCard: some View {
+    private func heroCopy(summary: RouteImpactSummary) -> String {
+        if summary.totalReviews == 1 {
+            return "Esta es la primera reseña registrada para este trayecto."
+        }
+
+        return "Tu reseña se sumó a \(summary.totalReviews) evaluaciones recientes de esta ruta."
+    }
+
+    private func scoreCard(summary: RouteImpactSummary) -> some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("AV. SONORA · TRAMO FINAL")
+            Text(summary.routeLabel.uppercased())
                 .font(.mono(11)).tracking(1)
                 .foregroundStyle(T.sec(night))
                 .textCase(.uppercase)
 
             HStack(spacing: 16) {
-                // Before
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Antes")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(T.sec(night))
-                        .textCase(.uppercase).tracking(0.3)
-                    Text("\(oldScore)")
+                        .textCase(.uppercase)
+                        .tracking(0.3)
+                    Text(summary.previousAverage == 0 ? "—" : "\(summary.previousAverage)")
                         .font(.serif(48))
                         .foregroundStyle(T.warn)
                 }
@@ -110,47 +127,62 @@ struct ScreenImpact: View {
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(T.sec(night))
 
-                // After (animated)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Ahora")
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(T.sec(night))
-                        .textCase(.uppercase).tracking(0.3)
-                    Text("\(displayedScore)")
+                        .textCase(.uppercase)
+                        .tracking(0.3)
+                    Text(displayedScore == 0 ? "—" : "\(displayedScore)")
                         .font(.serif(48))
-                        .foregroundStyle(T.safe)
-                        .contentTransition(.numericText(countsDown: false))
-                        .animation(.easeOut(duration: 0.5), value: displayedScore)
+                        .foregroundStyle(scoreDelta >= 0 ? T.safe : T.risk)
+                        .contentTransition(.numericText(countsDown: scoreDelta < 0))
+                        .animation(.easeOut(duration: 0.45), value: displayedScore)
                 }
             }
 
             Divider().background(T.line(night))
 
             HStack(spacing: 8) {
-                Text("+9 PTS")
+                Text(deltaLabel)
                     .font(.mono(11)).tracking(0.5).fontWeight(.bold)
-                    .foregroundStyle(T.safe)
-                    .padding(.horizontal, 10).padding(.vertical, 4)
-                    .background(T.safeTint, in: Capsule())
+                    .foregroundStyle(scoreDelta >= 0 ? T.safe : T.risk)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(scoreDelta >= 0 ? T.safeTint : T.riskTint, in: Capsule())
 
-                Text("Tu voto movió la percepción de este tramo hacia ")
+                Text(deltaDescription(summary: summary))
+                    .font(.system(size: 13))
                     .foregroundStyle(T.sec(night))
-                + Text("más seguro").foregroundStyle(T.safe).fontWeight(.semibold)
-                + Text(".").foregroundStyle(T.sec(night))
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .font(.system(size: 13))
-            .fixedSize(horizontal: false, vertical: true)
         }
         .padding(20)
         .background(T.surface(night), in: RoundedRectangle(cornerRadius: 26))
         .caminosCard(hi: true)
     }
 
-    // MARK: Stats row
-    private var statsRow: some View {
+    private var deltaLabel: String {
+        if scoreDelta == 0 { return "SIN CAMBIO" }
+        return scoreDelta > 0 ? "+\(scoreDelta) PTS" : "\(scoreDelta) PTS"
+    }
+
+    private func deltaDescription(summary: RouteImpactSummary) -> String {
+        if summary.previousAverage == 0 && summary.currentAverage > 0 {
+            return "Ya hay una base inicial de percepción para este trayecto."
+        }
+        if scoreDelta == 0 {
+            return "Tu reseña confirma la percepción actual de esta ruta."
+        }
+        return scoreDelta > 0
+            ? "Tu reseña empujó la percepción de esta ruta hacia un entorno más seguro."
+            : "Tu reseña bajó la percepción de seguridad y ayuda a alertar a la comunidad."
+    }
+
+    private func statsRow(summary: RouteImpactSummary) -> some View {
         HStack(spacing: 10) {
-            statCard(value: "14",    label: "reportes tuyos\neste mes")
-            statCard(value: "2,089", label: "reportes en\ntu zona")
+            statCard(value: "\(summary.totalReviews)", label: "reportes en\nesta ruta")
+            statCard(value: "\(summary.myReviewsThisMonth)", label: "reportes tuyos\neste mes")
         }
     }
 
@@ -170,7 +202,101 @@ struct ScreenImpact: View {
         .caminosCard()
     }
 
-    // MARK: CTAs
+    private func highlightsCard(summary: RouteImpactSummary) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            row(title: "Tu calificación", value: "\(summary.submittedSafetyScore)/5 en seguridad")
+
+            if let lighting = summary.submittedLightingScore {
+                row(title: "Iluminación", value: "\(lighting)/5")
+            }
+
+            row(title: "Modo", value: transportModesText(summary: summary))
+            row(title: "Enviado", value: submittedAtText(summary: summary))
+
+            if !summary.reportedTags.isEmpty {
+                chips(title: "Lo que reportaste", values: summary.reportedTags)
+            }
+
+            if !summary.communityTags.isEmpty {
+                chips(title: "Se repite en la comunidad", values: summary.communityTags)
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(T.surface(night), in: RoundedRectangle(cornerRadius: 22))
+        .caminosCard()
+    }
+
+    private func row(title: String, value: String) -> some View {
+        HStack(alignment: .top) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(T.sec(night))
+                .frame(width: 94, alignment: .leading)
+            Text(value)
+                .font(.system(size: 14))
+                .foregroundStyle(T.pri(night))
+            Spacer()
+        }
+    }
+
+    private func chips(title: String, values: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(T.sec(night))
+                .textCase(.uppercase)
+                .tracking(0.8)
+            FlowLayout(spacing: 8) {
+                ForEach(values, id: \.self) { value in
+                    Text(value)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(T.pri(night))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(night ? Color.white.opacity(0.06) : Color.black.opacity(0.05), in: Capsule())
+                }
+            }
+        }
+    }
+
+    private func transportModesText(summary: RouteImpactSummary) -> String {
+        let labels = summary.transportModes.map { mode -> String in
+            switch mode {
+            case .walk: return "Caminar"
+            case .metro: return "Metro"
+            case .bus: return "Bus"
+            }
+        }
+        return labels.isEmpty ? "Sin dato" : labels.joined(separator: " + ")
+    }
+
+    private func submittedAtText(summary: RouteImpactSummary) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: summary.submittedAt)
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 18) {
+            Spacer()
+            Text("Sin datos de reporte")
+                .font(.serif(34))
+                .foregroundStyle(T.pri(night))
+            Text("Esta pantalla solo muestra información confirmada desde la base de datos.")
+                .font(.system(size: 15))
+                .foregroundStyle(T.sec(night))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+            CaminosButton(label: "Volver al inicio", variant: .ghost) {
+                router.go(.home)
+            }
+            .padding(.horizontal, 16)
+            Spacer()
+        }
+    }
+
     private var ctaSection: some View {
         VStack(spacing: 10) {
             CaminosButton(label: "Ver mapa de la comunidad", icon: "line.3.horizontal.decrease") {
@@ -182,25 +308,51 @@ struct ScreenImpact: View {
         }
     }
 
-    // MARK: Animations
     private func runAnimations() {
-        // Check pop
+        guard let summary else {
+            displayedScore = 0
+            return
+        }
+
         withAnimation(.spring(response: 0.5, dampingFraction: 0.6).delay(0.1)) {
             checkScale = 1.0
             checkOpacity = 1.0
         }
 
-        // Score count-up
-        let steps = newScore - oldScore
-        for i in 1...steps {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4 + Double(i) * 0.04) {
-                displayedScore = oldScore + i
+        displayedScore = summary.previousAverage
+        let target = summary.currentAverage
+
+        guard target != summary.previousAverage else {
+            displayedScore = target
+            return
+        }
+
+        let direction = target > summary.previousAverage ? 1 : -1
+        let steps = abs(target - summary.previousAverage)
+        for index in 1...steps {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4 + Double(index) * 0.04) {
+                displayedScore = summary.previousAverage + (index * direction)
             }
         }
     }
 }
 
 #Preview {
-    let r = AppRouter()
-    return ScreenImpact().environment(r)
+    let router = AppRouter()
+    router.lastImpactSummary = RouteImpactSummary(
+        routeTitle: "Parque México",
+        routeLabel: "Riesgo medio",
+        previousAverage: 3,
+        currentAverage: 4,
+        totalReviews: 8,
+        myReviewsThisMonth: 2,
+        reportedTags: ["Habia gente", "Vigilancia"],
+        communityTags: ["Habia gente", "Poca luz"],
+        submittedAt: Date(),
+        submittedSafetyScore: 4,
+        submittedLightingScore: 3,
+        transportModes: [.walk, .bus],
+        savedRemotely: true
+    )
+    return ScreenImpact().environment(router)
 }

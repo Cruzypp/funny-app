@@ -9,6 +9,7 @@ struct AddressResult: Identifiable {
     let title: String
     let subtitle: String
     let coordinate: CLLocationCoordinate2D?
+    var mapItem: MKMapItem?
 }
 
 // MARK: - Location + search manager
@@ -22,11 +23,11 @@ final class LocationManager: NSObject {
     var searchResults: [AddressResult] = []
     var isSearching = false
 
-    // CDMX default region used for search bias
-    static let cdmxCenter = CLLocationCoordinate2D(latitude: 19.4326, longitude: -99.1332)
-    static let cdmxRegion = MKCoordinateRegion(
-        center: cdmxCenter,
-        span: MKCoordinateSpan(latitudeDelta: 0.35, longitudeDelta: 0.35)
+    // Ciudad de Mexico default region used for search bias
+    static let defaultCityCenter = CLLocationCoordinate2D(latitude: 19.4326, longitude: -99.1332)
+    static let defaultCityRegion = MKCoordinateRegion(
+        center: defaultCityCenter,
+        span: MKCoordinateSpan(latitudeDelta: 0.30, longitudeDelta: 0.30)
     )
 
     override init() {
@@ -41,7 +42,14 @@ final class LocationManager: NSObject {
     }
 
     func startTracking() {
-        manager.startUpdatingLocation()
+        switch manager.authorizationStatus {
+        case .authorizedWhenInUse, .authorizedAlways:
+            manager.startUpdatingLocation()
+        case .notDetermined:
+            manager.requestWhenInUseAuthorization()
+        default:
+            break
+        }
     }
 
     func stopTracking() {
@@ -60,7 +68,7 @@ final class LocationManager: NSObject {
         
         let request = MKLocalSearch.Request()
         request.naturalLanguageQuery = trimmed
-        request.region = LocationManager.cdmxRegion // Prioriza resultados en CDMX
+        request.region = LocationManager.defaultCityRegion // Prioriza resultados en CDMX
 
         do {
             let search = MKLocalSearch(request: request)
@@ -70,7 +78,8 @@ final class LocationManager: NSObject {
                 AddressResult(
                     title: item.name ?? "Sin nombre",
                     subtitle: item.placemark.title ?? "",
-                    coordinate: item.placemark.coordinate
+                    coordinate: item.placemark.coordinate,
+                    mapItem: item
                 )
             }
             isSearching = false

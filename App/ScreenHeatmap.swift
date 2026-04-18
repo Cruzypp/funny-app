@@ -1,5 +1,6 @@
 import MapKit
 import SwiftUI
+import FirebaseFirestore
 
 struct ScreenHeatmap: View {
     @Environment(AppRouter.self) var router
@@ -7,10 +8,12 @@ struct ScreenHeatmap: View {
     @State private var store = HeatmapStore()
     @State private var timeFilter: TimeFilter = .night
     @State private var modeFilter: ModeFilter = .all
+    @State private var reportCount: Int = 0
+    @State private var isLoading = true
     @State private var cameraPosition: MapCameraPosition = .region(
         MKCoordinateRegion(
-            center: CLLocationCoordinate2D(latitude: 19.4300, longitude: -99.1332),
-            span: MKCoordinateSpan(latitudeDelta: 0.10, longitudeDelta: 0.10)
+            center: LocationManager.defaultCityCenter,
+            span: MKCoordinateSpan(latitudeDelta: 0.12, longitudeDelta: 0.12)
         )
     )
 
@@ -21,12 +24,7 @@ struct ScreenHeatmap: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HeatmapHeader(
-                night: night,
-                signalCount: store.signalCount,
-                isLoading: store.isLoading,
-                onBack: { router.go(.home) }
-            )
+            HeatmapHeader(night: night, reportCount: reportCount, onBack: { router.go(.home) })
 
             ScrollView {
                 VStack(spacing: 0) {
@@ -37,23 +35,13 @@ struct ScreenHeatmap: View {
                         coverageLabel: "\(store.snapshot.reports.count.formatted()) rep · \(zones.count.formatted()) zonas",
                         cameraPosition: $cameraPosition
                     )
-
-                    HeatmapFilters(
-                        night: night,
-                        timeFilter: $timeFilter,
-                        modeFilter: $modeFilter
-                    )
-
-                    HeatmapInsightCard(
-                        night: night,
-                        zone: topZone,
-                        isLoading: store.isLoading,
-                        errorMessage: store.errorMessage,
-                        vocab: router.vocab
-                    )
-                    .padding(.horizontal, 16)
-                    .padding(.top, 16)
-                    .padding(.bottom, 40)
+                    HeatmapFilters(night: night,
+                                   timeFilter: $timeFilter,
+                                   modeFilter: $modeFilter)
+                    HeatmapInsightCard(night: night, reportCount: reportCount)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 16)
+                        .padding(.bottom, 40)
                 }
             }
             .scrollIndicators(.hidden)
@@ -63,8 +51,21 @@ struct ScreenHeatmap: View {
         }
         .background(T.bg(night))
         .task {
-            await store.load()
+            await loadRealData()
         }
+    }
+    
+    private func loadRealData() async {
+        isLoading = true
+        do {
+            let db = Firestore.firestore()
+            let snapshot = try await db.collection("route_reviews").getDocuments()
+            self.reportCount = snapshot.count
+        } catch {
+            print("Error fetching reports: \(error)")
+            self.reportCount = 0
+        }
+        isLoading = false
     }
 }
 
@@ -74,10 +75,35 @@ enum TimeFilter: String, CaseIterable {
     case night = "night"
 
     var label: String {
+        switch self { case .morning: "6–12h"; case .afternoon: "12–19h"; case .night: "19–6h" }
+    }
+    var icon: String {
+        switch self { case .morning, .afternoon: "sun.max.fill"; case .night: "moon.fill" }
+    }
+
+    var zones: [HeatZone] {
         switch self {
-        case .morning: "6-12h"
-        case .afternoon: "12-19h"
-        case .night: "19-6h"
+        case .morning:
+            return [
+                .init(center: CLLocationCoordinate2D(latitude: 19.4326, longitude: -99.1332), radius: 700, level: .high,   opacity: 0.35),
+                .init(center: CLLocationCoordinate2D(latitude: 19.4236, longitude: -99.1637), radius: 600, level: .high,   opacity: 0.30),
+                .init(center: CLLocationCoordinate2D(latitude: 19.4114, longitude: -99.1716), radius: 500, level: .medium, opacity: 0.28),
+            ]
+        case .afternoon:
+            return [
+                .init(center: CLLocationCoordinate2D(latitude: 19.4326, longitude: -99.1332), radius: 700, level: .high,   opacity: 0.30),
+                .init(center: CLLocationCoordinate2D(latitude: 19.4236, longitude: -99.1637), radius: 600, level: .high,   opacity: 0.35),
+                .init(center: CLLocationCoordinate2D(latitude: 19.4114, longitude: -99.1716), radius: 500, level: .medium, opacity: 0.30),
+                .init(center: CLLocationCoordinate2D(latitude: 19.3494, longitude: -99.1617), radius: 450, level: .medium, opacity: 0.28),
+            ]
+        case .night:
+            return [
+                .init(center: CLLocationCoordinate2D(latitude: 19.4236, longitude: -99.1637), radius: 800, level: .low,    opacity: 0.50),
+                .init(center: CLLocationCoordinate2D(latitude: 19.4114, longitude: -99.1716), radius: 700, level: .low,    opacity: 0.45),
+                .init(center: CLLocationCoordinate2D(latitude: 19.4342, longitude: -99.2099), radius: 550, level: .low,    opacity: 0.40),
+                .init(center: CLLocationCoordinate2D(latitude: 19.4326, longitude: -99.1332), radius: 500, level: .medium, opacity: 0.35),
+                .init(center: CLLocationCoordinate2D(latitude: 19.4200, longitude: -99.1700), radius: 400, level: .medium, opacity: 0.40),
+            ]
         }
     }
 
@@ -116,8 +142,7 @@ enum ModeFilter: String, CaseIterable {
 
 private struct HeatmapHeader: View {
     var night: Bool
-    var signalCount: Int
-    var isLoading: Bool
+    var reportCount: Int
     var onBack: () -> Void
 
     var body: some View {
@@ -126,7 +151,14 @@ private struct HeatmapHeader: View {
             title: "Mapa de zonas",
             night: night,
             onBack: onBack,
-            trailing: AnyView(counter)
+            trailing: AnyView(
+                Text("\(reportCount) reportes")
+                    .font(.mono(11)).tracking(0.3)
+                    .foregroundStyle(T.sec(night))
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(night ? Color.white.opacity(0.06) : Color.black.opacity(0.05),
+                                in: Capsule())
+            )
         )
         .padding(.horizontal, 16)
         .padding(.top, 58)
@@ -421,47 +453,10 @@ private struct HeatmapFilters: View {
     }
 }
 
-private struct HeatmapFilterButton: View {
-    var label: String
-    var icon: String?
-    var selected: Bool
-    var night: Bool
-    var compact = false
-    var action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: compact ? 4 : 6) {
-                if let icon {
-                    Image(systemName: icon)
-                        .font(.system(size: compact ? 12 : 13))
-                }
-                Text(label)
-                    .font(.system(size: compact ? 12 : 13, weight: .medium))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.82)
-            }
-            .foregroundStyle(selected ? T.bg(night) : T.pri(night))
-            .frame(maxWidth: .infinity)
-            .frame(height: compact ? 44 : 54)
-            .background(selected ? T.pri(night) : Color.clear,
-                        in: RoundedRectangle(cornerRadius: compact ? 999 : 16))
-            .overlay(
-                RoundedRectangle(cornerRadius: compact ? 999 : 16)
-                    .stroke(selected ? Color.clear : (night ? Color.white.opacity(0.10) : Color.black.opacity(0.14)),
-                            lineWidth: 1.5)
-            )
-        }
-        .buttonStyle(.plain)
-    }
-}
-
+// MARK: - Insight card
 private struct HeatmapInsightCard: View {
     var night: Bool
-    var zone: HeatZone?
-    var isLoading: Bool
-    var errorMessage: String?
-    var vocab: SafetyVocab
+    var reportCount: Int
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -479,7 +474,11 @@ private struct HeatmapInsightCard: View {
                     }
                 }
 
-                Text(subtitle)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Ciudad de México")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(T.pri(night))
+                Text("\(reportCount) reportes totales de la comunidad. Tu feedback está ayudando a mapear la seguridad en tiempo real.")
                     .font(.system(size: 12))
                     .foregroundStyle(T.sec(night))
                     .lineSpacing(2)

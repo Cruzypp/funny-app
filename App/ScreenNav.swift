@@ -1,60 +1,104 @@
 import SwiftUI
+import FirebaseAuth
 import MapKit
+import Foundation
 
 struct ScreenNav: View {
     @Environment(AppRouter.self) var router
 
-    @State private var progress: Double = 0.35
+    @State private var progress: Double = 0.0
     @State private var sharing = true
     @State private var alertVisible = true
     @State private var sosProgress: Double = 0
     @State private var sosPressing = false
     @State private var pulseScale: CGFloat = 1.0
     @State private var showSOSOptions = false
-    @State private var cameraPosition: MapCameraPosition = .userLocation(
-        fallback: .region(MKCoordinateRegion(
-            center: CLLocationCoordinate2D(latitude: 19.4130, longitude: -99.1650),
+    @State private var currentStepIndex = 0
+    @State private var progressTimer: Timer?
+    @State private var cameraPosition: MapCameraPosition = .region(
+        MKCoordinateRegion(
+            center: LocationManager.defaultCityCenter,
             span: MKCoordinateSpan(latitudeDelta: 0.015, longitudeDelta: 0.015)
-        ))
+        )
     )
 
     private var night: Bool { router.night }
 
-    // Safe route: Roma Sur → Condesa
-    private let routeCoords: [CLLocationCoordinate2D] = [
-        CLLocationCoordinate2D(latitude: 19.4090, longitude: -99.1550),
-        CLLocationCoordinate2D(latitude: 19.4085, longitude: -99.1600),
-        CLLocationCoordinate2D(latitude: 19.4100, longitude: -99.1650),
-        CLLocationCoordinate2D(latitude: 19.4120, longitude: -99.1700),
-        CLLocationCoordinate2D(latitude: 19.4145, longitude: -99.1750),
+    // Resolved from real route or fallback
+    private var routeCoords: [CLLocationCoordinate2D] {
+        if let route = router.selectedRoute {
+            let sanitized = sanitizeCoordinates(route.polyline.coordinates)
+            if sanitized.count >= 2 {
+                return sanitized
+            }
+        }
+        return cdmxFallbackRoute
+    }
+
+    private var destCoord: CLLocationCoordinate2D {
+        router.destCoordinate ?? CLLocationCoordinate2D(latitude: 19.3494, longitude: -99.1617)
+    }
+
+    // Fallback: Bellas Artes -> Coyoacan approximation
+    private let cdmxFallbackRoute: [CLLocationCoordinate2D] = [
+        CLLocationCoordinate2D(latitude: 19.4352, longitude: -99.1412),
+        CLLocationCoordinate2D(latitude: 19.4308, longitude: -99.1538),
+        CLLocationCoordinate2D(latitude: 19.4145, longitude: -99.1671),
+        CLLocationCoordinate2D(latitude: 19.3840, longitude: -99.1694),
+        CLLocationCoordinate2D(latitude: 19.3494, longitude: -99.1617),
     ]
 
-    private let destCoord = CLLocationCoordinate2D(latitude: 19.4145, longitude: -99.1750)
+    private var totalDistanceKm: String {
+        guard let route = router.selectedRoute else { return "–" }
+        return String(format: "%.1f km", route.distance / 1000)
+    }
+
+    private var remainingMinutes: Int {
+        guard let route = router.selectedRoute else { return 16 }
+        let total = route.expectedTravelTime
+        return max(1, Int(total * (1.0 - progress) / 60))
+    }
+
+    private var currentInstruction: String {
+        guard let route = router.selectedRoute, !route.steps.isEmpty else {
+            return "Continúa por la ruta indicada"
+        }
+        let step = route.steps[min(currentStepIndex, route.steps.count - 1)]
+        return step.instructions.isEmpty ? "Continúa recto" : step.instructions
+    }
+
+    private var navigationModeLabel: String {
+        let modes = router.activeRouteContext?.transportModes ?? [.walk]
+        if modes.contains(.metro) { return "Metro + caminata" }
+        if modes.contains(.bus) { return "Bus + caminata" }
+        return "Caminando"
+    }
 
     var body: some View {
         ZStack {
-            // Full-bleed MapKit map
-            Map(position: $cameraPosition) {
-                // Route polyline with glow effect
-                MapPolyline(coordinates: routeCoords)
-                    .stroke(T.safe.opacity(0.35), lineWidth: 10)
-                MapPolyline(coordinates: routeCoords)
-                    .stroke(T.safe, lineWidth: 4)
-
-                // Destination
-                Annotation("Destino", coordinate: destCoord, anchor: .bottom) {
-                    VStack(spacing: 4) {
-                        Image(systemName: "diamond.fill")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 36, height: 36)
-                            .background(T.accent, in: Circle())
-                            .shadow(radius: 6)
+                Map(position: $cameraPosition) {
+                    // Glow + solid polyline
+                    if routeCoords.count >= 2 {
+                        MapPolyline(coordinates: routeCoords)
+                            .stroke(T.safe.opacity(0.30), lineWidth: 10)
+                        MapPolyline(coordinates: routeCoords)
+                            .stroke(T.safe, lineWidth: 4)
                     }
+
+                    // Destination marker
+                    Annotation("Destino", coordinate: destCoord, anchor: .bottom) {
+                    Image(systemName: "diamond.fill")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 36, height: 36)
+                        .background(T.accent, in: Circle())
+                        .shadow(radius: 6)
                 }
 
-                UserAnnotation()
-            }
+                    if router.location.userLocation != nil {
+                        UserAnnotation()
+                    }
+                }
             .mapStyle(night
                 ? .standard(elevation: .realistic, pointsOfInterest: .excludingAll)
                 : .standard(elevation: .realistic)
@@ -80,8 +124,23 @@ struct ScreenNav: View {
         .onAppear {
             startProgress()
             router.location.startTracking()
+            Task {
+                if let context = router.activeRouteContext {
+                    let persisted = await FirebaseService.shared.persistRouteContext(context)
+                    router.activeRouteContext = persisted
+                }
+            }
+            // Center map on route start
+            if let first = routeCoords.first {
+                cameraPosition = .region(MKCoordinateRegion(
+                    center: first,
+                    span: MKCoordinateSpan(latitudeDelta: 0.012, longitudeDelta: 0.012)
+                ))
+            }
         }
         .onDisappear {
+            progressTimer?.invalidate()
+            progressTimer = nil
             router.location.stopTracking()
         }
     }
@@ -90,7 +149,7 @@ struct ScreenNav: View {
     private var topCard: some View {
         VStack(spacing: 10) {
             HStack(spacing: 12) {
-                Button { router.go(.detail(routeId: "safe")) } label: {
+                Button { router.go(.results(dest: router.destName.isEmpty ? "Destino" : router.destName)) } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundStyle(T.pri(night))
@@ -105,29 +164,30 @@ struct ScreenNav: View {
                         Circle().fill(T.safe).frame(width: 6, height: 6)
                             .opacity(pulseScale > 1 ? 0.3 : 1.0)
                             .animation(.easeInOut(duration: 1.0).repeatForever(), value: pulseScale)
-                        Text("NAVEGANDO · Caminando")
+                        Text("NAVEGANDO · \(navigationModeLabel)")
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(T.sec(night))
                             .tracking(0.3)
                     }
-                    Text("En 120 m, gira a la izquierda en Sonora")
+                    Text(currentInstruction)
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(T.pri(night))
+                        .lineLimit(2)
                 }
             }
 
-            // Alert
-            if alertVisible && progress > 0.4 && progress < 0.75 {
+            // Safety alert mid-route
+            if alertVisible && progress > 0.35 && progress < 0.70 {
                 HStack(spacing: 10) {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 18))
                         .foregroundStyle(night ? Color.white : T.warn)
 
                     VStack(alignment: .leading, spacing: 1) {
-                        Text("Entrando a zona de riesgo medio")
+                        Text("Zona con reportes recientes")
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(night ? Color.white : T.warn)
-                        Text("Baja iluminación · reportes recientes")
+                        Text("Baja iluminación · mantente alerta")
                             .font(.system(size: 12))
                             .foregroundStyle(night ? Color.white.opacity(0.85) : T.warn.opacity(0.85))
                     }
@@ -168,7 +228,7 @@ struct ScreenNav: View {
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        Text("16")
+                        Text("\(remainingMinutes)")
                             .font(.serif(40))
                             .foregroundStyle(T.pri(night))
                         Text("min restantes")
@@ -176,7 +236,7 @@ struct ScreenNav: View {
                             .foregroundStyle(T.sec(night))
                             .padding(.bottom, 3)
                     }
-                    Text("LLEGADA · 7:11 PM · 1.2 KM")
+                    Text("LLEGADA · \(arrivalTime()) · \(totalDistanceKm)")
                         .font(.mono(11)).tracking(0.3)
                         .foregroundStyle(T.sec(night))
                 }
@@ -202,7 +262,6 @@ struct ScreenNav: View {
             .padding(.bottom, 16)
 
             HStack(spacing: 10) {
-                // Compartir ubicación real
                 if let loc = router.location.userLocation {
                     ShareLink(item: "Mi ubicación en Caminos: https://maps.apple.com/?ll=\(loc.coordinate.latitude),\(loc.coordinate.longitude)") {
                         HStack(spacing: 10) {
@@ -224,33 +283,29 @@ struct ScreenNav: View {
                                     in: RoundedRectangle(cornerRadius: 18))
                     }
                 } else {
-                    Button(action: { }) {
-                        HStack(spacing: 10) {
-                            Image(systemName: "square.and.arrow.up")
-                                .font(.system(size: 17, weight: .medium))
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text("Compartir")
-                                    .font(.system(size: 13, weight: .semibold))
-                                Text("Sin señal GPS")
-                                    .font(.system(size: 10))
-                                    .opacity(0.75)
-                            }
+                    HStack(spacing: 10) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 17, weight: .medium))
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("Compartir")
+                                .font(.system(size: 13, weight: .semibold))
+                            Text("Sin señal GPS")
+                                .font(.system(size: 10))
+                                .opacity(0.75)
                         }
-                        .foregroundStyle(T.sec(night))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .frame(height: 56)
-                        .padding(.horizontal, 14)
-                        .background(night ? Color.white.opacity(0.06) : Color.black.opacity(0.04),
-                                    in: RoundedRectangle(cornerRadius: 18))
                     }
+                    .foregroundStyle(T.sec(night))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(height: 56)
+                    .padding(.horizontal, 14)
+                    .background(night ? Color.white.opacity(0.06) : Color.black.opacity(0.04),
+                                in: RoundedRectangle(cornerRadius: 18))
                 }
 
                 sosButton
                     .frame(width: 56, height: 56)
                     .onChange(of: sosProgress) { _, newValue in
-                        if newValue >= 1.0 {
-                            triggerEmergency()
-                        }
+                        if newValue >= 1.0 { triggerEmergency() }
                     }
             }
             .padding(.horizontal, 20)
@@ -264,16 +319,30 @@ struct ScreenNav: View {
                 .foregroundStyle(T.sec(night))
                 .padding(.top, 10)
 
-            Button { router.go(.survey) } label: {
+            Button {
+                Task {
+                    let uid: String
+                    if let currentUid = Auth.auth().currentUser?.uid {
+                        uid = currentUid
+                    } else {
+                        uid = await FirebaseService.shared.currentUserId()
+                    }
+                    
+                    try? await FirebaseService.shared.updateLocation(
+                        userId: uid,
+                        lat: router.location.userLocation?.coordinate.latitude ?? destCoord.latitude,
+                        lng: router.location.userLocation?.coordinate.longitude ?? destCoord.longitude,
+                        estado: .llego
+                    )
+                    router.go(.survey)
+                }
+            } label: {
                 Text("Llegaste al destino →")
                     .font(.system(size: 12))
                     .foregroundStyle(T.sec(night))
                     .frame(maxWidth: .infinity)
                     .frame(height: 38)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 999)
-                            .stroke(T.line(night), lineWidth: 1)
-                    )
+                    .overlay(RoundedRectangle(cornerRadius: 999).stroke(T.line(night), lineWidth: 1))
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 20)
@@ -321,12 +390,31 @@ struct ScreenNav: View {
         )
     }
 
-    // MARK: Timer
+    // MARK: Helpers
     private func startProgress() {
         pulseScale = 1.1
-        Timer.scheduledTimer(withTimeInterval: 0.12, repeats: true) { t in
-            if progress >= 1.0 { t.invalidate(); return }
-            progress = min(1.0, progress + 0.002)
+        progressTimer?.invalidate()
+        // Advance progress and update step index based on route steps
+        progressTimer = Timer.scheduledTimer(withTimeInterval: 0.12, repeats: true) { timer in
+            if progress >= 1.0 {
+                timer.invalidate()
+                progressTimer = nil
+                return
+            }
+            progress = min(1.0, progress + 0.001)
+            // Update current step
+            if let route = router.selectedRoute, !route.steps.isEmpty {
+                let stepIdx = Int(progress * Double(route.steps.count))
+                currentStepIndex = min(stepIdx, route.steps.count - 1)
+            }
+        }
+    }
+
+    private func sanitizeCoordinates(_ coordinates: [CLLocationCoordinate2D]) -> [CLLocationCoordinate2D] {
+        coordinates.filter { coordinate in
+            CLLocationCoordinate2DIsValid(coordinate)
+                && (-90.0...90.0).contains(coordinate.latitude)
+                && (-180.0...180.0).contains(coordinate.longitude)
         }
     }
 
@@ -334,6 +422,14 @@ struct ScreenNav: View {
         showSOSOptions = true
         sosProgress = 0
         sosPressing = false
+    }
+
+    private func arrivalTime() -> String {
+        let mins = remainingMinutes
+        let arrival = Date().addingTimeInterval(Double(mins) * 60)
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm a"
+        return formatter.string(from: arrival)
     }
 }
 

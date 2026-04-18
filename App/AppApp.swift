@@ -16,6 +16,7 @@ struct AppApp: App {
         FirebaseApp.configure()
     }
 
+    
     var body: some Scene {
         WindowGroup {
             NavigationStack {
