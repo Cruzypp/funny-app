@@ -1,4 +1,5 @@
 import SwiftUI
+import MapKit
 
 struct ScreenNav: View {
     @Environment(AppRouter.self) var router
@@ -9,35 +10,59 @@ struct ScreenNav: View {
     @State private var sosProgress: Double = 0
     @State private var sosPressing = false
     @State private var pulseScale: CGFloat = 1.0
+    @State private var showSOSOptions = false
+    @State private var cameraPosition: MapCameraPosition = .userLocation(
+        fallback: .region(MKCoordinateRegion(
+            center: CLLocationCoordinate2D(latitude: 19.4130, longitude: -99.1650),
+            span: MKCoordinateSpan(latitudeDelta: 0.015, longitudeDelta: 0.015)
+        ))
+    )
 
     private var night: Bool { router.night }
 
-    // Route points in design space (402 × 874)
-    private let routePts: [CGPoint] = [
-        [60,340],[150,340],[150,260],[220,260],
-        [220,180],[290,180],[290,100],[330,100],[330,80]
-    ].map { CGPoint(x: $0[0], y: $0[1]) }
+    // Safe route: Roma Sur → Condesa
+    private let routeCoords: [CLLocationCoordinate2D] = [
+        CLLocationCoordinate2D(latitude: 19.4090, longitude: -99.1550),
+        CLLocationCoordinate2D(latitude: 19.4085, longitude: -99.1600),
+        CLLocationCoordinate2D(latitude: 19.4100, longitude: -99.1650),
+        CLLocationCoordinate2D(latitude: 19.4120, longitude: -99.1700),
+        CLLocationCoordinate2D(latitude: 19.4145, longitude: -99.1750),
+    ]
 
-    private var userPos: CGPoint {
-        let total = Double(routePts.count - 1)
-        let flt = progress * total
-        let idx = min(Int(flt), routePts.count - 2)
-        let t = flt - Double(idx)
-        let a = routePts[idx], b = routePts[idx + 1]
-        return CGPoint(x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t)
-    }
+    private let destCoord = CLLocationCoordinate2D(latitude: 19.4145, longitude: -99.1750)
 
     var body: some View {
         ZStack {
-            // Full-bleed map
-            CDMXMap(
-                designHeight: 874,
-                night: night,
-                routes: [.init(id: "active", color: T.safe, isActive: true, points: routePts)],
-                markers: [.init(point: CGPoint(x: 330, y: 80), kind: .dest)],
-                userPos: userPos,
-                showLabels: true
+            // Full-bleed MapKit map
+            Map(position: $cameraPosition) {
+                // Route polyline with glow effect
+                MapPolyline(coordinates: routeCoords)
+                    .stroke(T.safe.opacity(0.35), lineWidth: 10)
+                MapPolyline(coordinates: routeCoords)
+                    .stroke(T.safe, lineWidth: 4)
+
+                // Destination
+                Annotation("Destino", coordinate: destCoord, anchor: .bottom) {
+                    VStack(spacing: 4) {
+                        Image(systemName: "diamond.fill")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 36, height: 36)
+                            .background(T.accent, in: Circle())
+                            .shadow(radius: 6)
+                    }
+                }
+
+                UserAnnotation()
+            }
+            .mapStyle(night
+                ? .standard(elevation: .realistic, pointsOfInterest: .excludingAll)
+                : .standard(elevation: .realistic)
             )
+            .mapControls {
+                MapCompass()
+                MapScaleView()
+            }
             .ignoresSafeArea()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
@@ -52,7 +77,13 @@ struct ScreenNav: View {
             }
         }
         .ignoresSafeArea(edges: .bottom)
-        .onAppear { startProgress() }
+        .onAppear {
+            startProgress()
+            router.location.startTracking()
+        }
+        .onDisappear {
+            router.location.stopTracking()
+        }
     }
 
     // MARK: Top glass card
@@ -128,14 +159,12 @@ struct ScreenNav: View {
     // MARK: Bottom sheet
     private var bottomSheet: some View {
         VStack(spacing: 0) {
-            // Handle
             Capsule()
                 .fill(T.line(night))
                 .frame(width: 40, height: 4)
                 .padding(.top, 12)
                 .padding(.bottom, 14)
 
-            // ETA + progress
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -156,7 +185,6 @@ struct ScreenNav: View {
             }
             .padding(.horizontal, 20)
 
-            // Progress bar
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule()
@@ -173,48 +201,69 @@ struct ScreenNav: View {
             .padding(.top, 12)
             .padding(.bottom, 16)
 
-            // Share + SOS
             HStack(spacing: 10) {
-                // Share location
-                Button {
-                    withAnimation { sharing.toggle() }
-                } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: "square.and.arrow.up")
-                            .font(.system(size: 17, weight: .medium))
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(sharing ? "Compartiendo" : "Compartir")
-                                .font(.system(size: 13, weight: .semibold))
-                            Text(sharing ? "Mamá · Sofía · Diego" : "con contactos")
-                                .font(.system(size: 10))
-                                .opacity(0.75)
+                // Compartir ubicación real
+                if let loc = router.location.userLocation {
+                    ShareLink(item: "Mi ubicación en Caminos: https://maps.apple.com/?ll=\(loc.coordinate.latitude),\(loc.coordinate.longitude)") {
+                        HStack(spacing: 10) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 17, weight: .medium))
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("Compartir")
+                                    .font(.system(size: 13, weight: .semibold))
+                                Text("Vía enlace")
+                                    .font(.system(size: 10))
+                                    .opacity(0.75)
+                            }
                         }
+                        .foregroundStyle(T.pri(night))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(height: 56)
+                        .padding(.horizontal, 14)
+                        .background(night ? Color.white.opacity(0.06) : Color.black.opacity(0.04),
+                                    in: RoundedRectangle(cornerRadius: 18))
                     }
-                    .foregroundStyle(sharing ? T.safe : T.pri(night))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .frame(height: 56)
-                    .padding(.horizontal, 14)
-                    .background(
-                        sharing
-                            ? (night ? T.safe.opacity(0.25) : T.safeTint)
-                            : (night ? Color.white.opacity(0.06) : Color.black.opacity(0.04)),
-                        in: RoundedRectangle(cornerRadius: 18)
-                    )
+                } else {
+                    Button(action: { }) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 17, weight: .medium))
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("Compartir")
+                                    .font(.system(size: 13, weight: .semibold))
+                                Text("Sin señal GPS")
+                                    .font(.system(size: 10))
+                                    .opacity(0.75)
+                            }
+                        }
+                        .foregroundStyle(T.sec(night))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(height: 56)
+                        .padding(.horizontal, 14)
+                        .background(night ? Color.white.opacity(0.06) : Color.black.opacity(0.04),
+                                    in: RoundedRectangle(cornerRadius: 18))
+                    }
                 }
-                .buttonStyle(.plain)
 
-                // SOS (hold to activate)
                 sosButton
                     .frame(width: 56, height: 56)
+                    .onChange(of: sosProgress) { _, newValue in
+                        if newValue >= 1.0 {
+                            triggerEmergency()
+                        }
+                    }
             }
             .padding(.horizontal, 20)
+            .sheet(isPresented: $showSOSOptions) {
+                EmergencySheet()
+                    .presentationDetents([.medium, .large])
+            }
 
             Text("Mantén presionado SOS por 3s para emergencia")
                 .font(.system(size: 11))
                 .foregroundStyle(T.sec(night))
                 .padding(.top, 10)
 
-            // Dev: skip to survey
             Button { router.go(.survey) } label: {
                 Text("Llegaste al destino →")
                     .font(.system(size: 12))
@@ -241,7 +290,6 @@ struct ScreenNav: View {
         ZStack {
             RoundedRectangle(cornerRadius: 18).fill(T.risk)
 
-            // Fill progress overlay
             GeometryReader { geo in
                 VStack(spacing: 0) {
                     Spacer()
@@ -280,6 +328,12 @@ struct ScreenNav: View {
             if progress >= 1.0 { t.invalidate(); return }
             progress = min(1.0, progress + 0.002)
         }
+    }
+
+    private func triggerEmergency() {
+        showSOSOptions = true
+        sosProgress = 0
+        sosPressing = false
     }
 }
 

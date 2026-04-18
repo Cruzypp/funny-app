@@ -1,18 +1,39 @@
 import SwiftUI
+import MapKit
 
 struct ScreenResults: View {
     @Environment(AppRouter.self) var router
     var dest: String
 
     @State private var selected = "safe"
+    @State private var cameraPosition: MapCameraPosition = .region(
+        MKCoordinateRegion(
+            center: CLLocationCoordinate2D(latitude: 19.4180, longitude: -99.1680),
+            span: MKCoordinateSpan(latitudeDelta: 0.04, longitudeDelta: 0.04)
+        )
+    )
 
     private var night: Bool { router.night }
 
-    private let routes: [MapRoute] = [
-        .init(id: "fast", color: Color(hex: "2563EB"), isActive: false,
-              points: [[60,340],[60,250],[140,250],[140,160],[260,160],[260,80],[330,80]].map { CGPoint(x: $0[0], y: $0[1]) }),
-        .init(id: "safe", color: T.safe, isActive: true,
-              points: [[60,340],[150,340],[150,260],[220,260],[220,180],[290,180],[290,100],[330,100],[330,80]].map { CGPoint(x: $0[0], y: $0[1]) }),
+    // Real CDMX coordinates: Roma Sur → Condesa (El Péndulo area)
+    private let originCoord   = CLLocationCoordinate2D(latitude: 19.4090, longitude: -99.1550)
+    private let destCoord     = CLLocationCoordinate2D(latitude: 19.4145, longitude: -99.1750)
+
+    // Fast route (blue) — via Insurgentes
+    private let fastRoute: [CLLocationCoordinate2D] = [
+        CLLocationCoordinate2D(latitude: 19.4090, longitude: -99.1550),
+        CLLocationCoordinate2D(latitude: 19.4110, longitude: -99.1580),
+        CLLocationCoordinate2D(latitude: 19.4130, longitude: -99.1620),
+        CLLocationCoordinate2D(latitude: 19.4145, longitude: -99.1750),
+    ]
+
+    // Safe route (green) — via quieter streets
+    private let safeRoute: [CLLocationCoordinate2D] = [
+        CLLocationCoordinate2D(latitude: 19.4090, longitude: -99.1550),
+        CLLocationCoordinate2D(latitude: 19.4085, longitude: -99.1600),
+        CLLocationCoordinate2D(latitude: 19.4100, longitude: -99.1650),
+        CLLocationCoordinate2D(latitude: 19.4120, longitude: -99.1700),
+        CLLocationCoordinate2D(latitude: 19.4145, longitude: -99.1750),
     ]
 
     private var options: [RouteOption] {[
@@ -26,14 +47,6 @@ struct ScreenResults: View {
               transit: [.walk, .bus], badge: nil, color: T.warn,
               detail: "9 min caminando · 19 min Metrobús"),
     ]}
-
-    private var activeRoutes: [MapRoute] {
-        routes.map { r in
-            var copy = r
-            copy.isActive = (r.id == selected)
-            return copy
-        }
-    }
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -93,22 +106,53 @@ struct ScreenResults: View {
     // MARK: Map section
     private var mapSection: some View {
         ZStack(alignment: .topTrailing) {
-            CDMXMap(
-                designHeight: 380,
-                night: night,
-                routes: activeRoutes,
-                markers: [
-                    .init(point: CGPoint(x: 60, y: 340), kind: .origin),
-                    .init(point: CGPoint(x: 330, y: 80), kind: .dest),
-                ]
-            )
+            Map(position: $cameraPosition) {
+                // Route polylines
+                if selected == "fast" || selected == "mixed" {
+                    MapPolyline(coordinates: fastRoute)
+                        .stroke(Color(hex: "2563EB"), lineWidth: 3)
+                }
+                MapPolyline(coordinates: safeRoute)
+                    .stroke(selected == "safe" ? T.safe : T.safe.opacity(0.4), lineWidth: selected == "safe" ? 4 : 2)
+
+                // Origin marker
+                Annotation("Origen", coordinate: originCoord, anchor: .bottom) {
+                    Circle()
+                        .fill(T.pri(night))
+                        .frame(width: 12, height: 12)
+                        .overlay(Circle().stroke(.white, lineWidth: 2))
+                }
+
+                // Destination marker
+                Annotation(dest, coordinate: destCoord, anchor: .bottom) {
+                    VStack(spacing: 4) {
+                        Image(systemName: "diamond.fill")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 32, height: 32)
+                            .background(T.accent, in: Circle())
+                            .shadow(radius: 4)
+                        Text(dest)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(T.pri(night))
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(T.surface(night), in: Capsule())
+                    }
+                }
+
+                UserAnnotation()
+            }
+            .mapStyle(night ? .standard(pointsOfInterest: .excludingAll) : .standard())
+            .mapControls { }
+            .frame(height: 280)
+            .clipShape(RoundedRectangle(cornerRadius: 0))
 
             // Route legend
             VStack(alignment: .trailing, spacing: 6) {
                 legendPill("Rápida", color: Color(hex: "2563EB"))
                 legendPill("Segura", color: T.safe)
             }
-            .padding(.top, 40)
+            .padding(.top, 12)
             .padding(.trailing, 12)
         }
     }
@@ -131,7 +175,6 @@ struct ScreenResults: View {
         let isSel = selected == option.id
         Button { selected = option.id } label: {
             VStack(alignment: .leading, spacing: 0) {
-                // Badge
                 if let badge = option.badge {
                     Text(badge.uppercased())
                         .font(.system(size: 10, weight: .bold)).tracking(0.5)
@@ -142,7 +185,6 @@ struct ScreenResults: View {
                 }
 
                 HStack(alignment: .top, spacing: 16) {
-                    // Time column
                     VStack(alignment: .leading, spacing: 2) {
                         Text("\(option.timeMinutes)")
                             .font(.serif(34))
@@ -153,7 +195,6 @@ struct ScreenResults: View {
                     }
                     .frame(minWidth: 64, alignment: .leading)
 
-                    // Content
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 8) {
                             Text(option.label)
