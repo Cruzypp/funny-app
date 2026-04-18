@@ -15,7 +15,7 @@ extension Color {
     }
 }
 
-// MARK: - Design tokens (mirrors tokens.jsx)
+// MARK: - Design tokens
 enum T {
     // Base surfaces
     static let ink   = Color(hex: "0F1420")

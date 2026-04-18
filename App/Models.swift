@@ -1,4 +1,14 @@
 import SwiftUI
+import MapKit
+
+// MARK: - MKPolyline helper
+extension MKPolyline {
+    var coordinates: [CLLocationCoordinate2D] {
+        var coords = Array(repeating: kCLLocationCoordinate2DInvalid, count: pointCount)
+        getCoordinates(&coords, range: NSRange(location: 0, length: pointCount))
+        return coords
+    }
+}
 
 // MARK: - Map primitives
 struct MapRoute {
@@ -52,6 +62,74 @@ struct RouteOption: Identifiable {
     var badge: String?
     var color: Color
     var detail: String
+}
+
+struct RouteReviewContext {
+    var routeId: String?
+    var routeKey: String
+    var originName: String
+    var destinationName: String
+    var routeLabel: String
+    var startedAt: Date
+    var expectedMinutes: Int
+    var transportModes: [TransitMode]
+    var destinationCoordinate: CLLocationCoordinate2D?
+    var path: [CLLocationCoordinate2D]
+}
+
+struct RouteImpactSummary {
+    var routeTitle: String
+    var routeLabel: String
+    var previousAverage: Int
+    var currentAverage: Int
+    var totalReviews: Int
+    var myReviewsThisMonth: Int
+    var reportedTags: [String]
+    var communityTags: [String]
+    var submittedAt: Date
+    var submittedSafetyScore: Int
+    var submittedLightingScore: Int?
+    var transportModes: [TransitMode]
+    var savedRemotely: Bool
+}
+
+func routeDangerStorageValue(forAverageSafety averageSafety: Int) -> String {
+    switch averageSafety {
+    case 4...:
+        return "bajo"
+    case 3:
+        return "medio"
+    default:
+        return "alto"
+    }
+}
+
+func routeDangerLabel(forAverageSafety averageSafety: Int) -> String {
+    guard averageSafety > 0 else { return "Sin reportes" }
+
+    switch routeDangerStorageValue(forAverageSafety: averageSafety) {
+    case "bajo":
+        return "Riesgo bajo"
+    case "medio":
+        return "Riesgo medio"
+    default:
+        return "Riesgo alto"
+    }
+}
+
+func makeRouteKey(origin: String, destination: String) -> String {
+    func normalize(_ text: String) -> String {
+        let folded = text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+        let scalars = folded.unicodeScalars.map { scalar -> Character in
+            CharacterSet.alphanumerics.contains(scalar) ? Character(scalar) : "-"
+        }
+        let collapsed = String(scalars)
+            .replacingOccurrences(of: "-+", with: "-", options: .regularExpression)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "-"))
+        return collapsed.isEmpty ? "ruta" : collapsed
+    }
+
+    return "\(normalize(origin))__\(normalize(destination))"
 }
 
 struct SegmentNote {

@@ -143,7 +143,7 @@ struct FSRoute: Codable, Identifiable {
     @DocumentID var id: String?
     var origen: FSCoord
     var destino: FSCoord
-    var rutaSugerida: [[Double]]         // array de [lat, lng]
+    var rutaSugerida: [GeoPoint]         // GeoPoints — Firestore no admite arrays anidados
     var nivelRiesgo: String              // "alto" | "medio" | "bajo"
     var tiempoEstimado: Int              // minutos
     var userId: String
@@ -163,6 +163,42 @@ struct FSCoord: Codable {
     var latitud: Double
     var longitud: Double
     var nombre: String
+}
+
+struct FSRouteReview: Codable, Identifiable {
+    @DocumentID var id: String?
+    var routeId: String?
+    var routeKey: String
+    var userId: String
+    var originName: String
+    var destinationName: String
+    var routeLabel: String
+    var transportModes: [String]
+    var safetyScore: Int
+    var lightingScore: Int?
+    var tags: [String]
+    var destinationLat: Double?
+    var destinationLng: Double?
+    var startedAt: Timestamp
+    var submittedAt: Timestamp
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case routeId = "route_id"
+        case routeKey = "route_key"
+        case userId = "user_id"
+        case originName = "origin_name"
+        case destinationName = "destination_name"
+        case routeLabel = "route_label"
+        case transportModes = "transport_modes"
+        case safetyScore = "safety_score"
+        case lightingScore = "lighting_score"
+        case tags
+        case destinationLat = "destination_lat"
+        case destinationLng = "destination_lng"
+        case startedAt = "started_at"
+        case submittedAt = "submitted_at"
+    }
 }
 
 // MARK: - 5. Alertas
