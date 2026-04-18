@@ -5,8 +5,7 @@ struct ScreenHeatmap: View {
     @Environment(AppRouter.self) var router
 
     @State private var store = HeatmapStore()
-    @State private var timeFilter: TimeFilter = .night
-    @State private var modeFilter: ModeFilter = .all
+    @State private var timeFilter: TimeFilter = .all
     @State private var cameraPosition: MapCameraPosition = .region(
         MKCoordinateRegion(
             center: LocationManager.defaultCityCenter,
@@ -16,8 +15,7 @@ struct ScreenHeatmap: View {
 
 
     private var night: Bool { router.night }
-    private var zones: [HeatZone] { store.zones(timeFilter: timeFilter, modeFilter: modeFilter) }
-    private var topZone: HeatZone? { store.topZone(timeFilter: timeFilter, modeFilter: modeFilter) }
+    private var zones: [HeatZone] { store.zones(timeFilter: timeFilter, modeFilter: .all) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -37,20 +35,11 @@ struct ScreenHeatmap: View {
                         coverageLabel: "\(store.snapshot.reports.count.formatted()) rep · \(zones.count.formatted()) zonas",
                         cameraPosition: $cameraPosition
                     )
-                    HeatmapFilters(night: night,
-                        timeFilter: $timeFilter,
-                        modeFilter: $modeFilter)
-                    HeatmapInsightCard(
+                    HeatmapTimeFilters(
                         night: night,
-                        signalCount: store.signalCount,
-                        zone: topZone,
-                        isLoading: store.isLoading,
-                        errorMessage: store.errorMessage,
-                        vocab: router.vocab
+                        timeFilter: $timeFilter
                     )
-                        .padding(.horizontal, 16)
-                        .padding(.top, 16)
-                        .padding(.bottom, 40)
+                    .padding(.bottom, 28)
                 }
             }
             .scrollIndicators(.hidden)
@@ -66,30 +55,27 @@ struct ScreenHeatmap: View {
 }
 
 enum TimeFilter: String, CaseIterable {
+    case all = "all"
     case morning = "morning"
     case afternoon = "afternoon"
     case night = "night"
 
     var label: String {
-        switch self { case .morning: "6–12h"; case .afternoon: "12–19h"; case .night: "19–6h" }
+        switch self { case .all: "Todo"; case .morning: "6–12h"; case .afternoon: "12–19h"; case .night: "19–6h" }
     }
     var icon: String {
-        switch self { case .morning, .afternoon: "sun.max.fill"; case .night: "moon.fill" }
+        switch self { case .all: "map.fill"; case .morning, .afternoon: "sun.max.fill"; case .night: "moon.fill" }
     }
 }
 
 enum ModeFilter: String, CaseIterable {
     case all
     case walk
-    case metro
-    case bus
 
     var label: String {
         switch self {
         case .all: "Todos"
         case .walk: "Caminar"
-        case .metro: "Metro"
-        case .bus: "Bus"
         }
     }
 
@@ -97,8 +83,6 @@ enum ModeFilter: String, CaseIterable {
         switch self {
         case .all: nil
         case .walk: "figure.walk"
-        case .metro: "tram.fill"
-        case .bus: "bus.fill"
         }
     }
 }
@@ -118,8 +102,8 @@ private struct HeatmapHeader: View {
             trailing: AnyView(counter)
         )
         .padding(.horizontal, 16)
-        .padding(.top, 58)
-        .padding(.bottom, 12)
+        .padding(.top, 50)
+        .padding(.bottom, 8)
         .background(T.bg(night))
     }
 
@@ -177,7 +161,7 @@ private struct HeatmapMapSection: View {
                 MapUserLocationButton()
                 MapCompass()
             }
-            .frame(height: 420)
+            .frame(height: 520)
             .onChange(of: zoneSignature) { _, _ in
                 withAnimation(.easeInOut(duration: 0.25)) {
                     cameraPosition = .region(Self.region(for: zones))
@@ -302,10 +286,10 @@ private struct HeatmapEmptyState: View {
                 .foregroundStyle(T.warn)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("Sin zonas para este filtro")
+                Text("Sin zonas disponibles")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(T.pri(night))
-                Text("Cambia la hora o el transporte.")
+                Text("Aún no hay datos mapeables.")
                     .font(.system(size: 12))
                     .foregroundStyle(T.sec(night))
             }
@@ -349,35 +333,14 @@ private struct HeatmapLegend: View {
     }
 }
 
-private struct HeatmapFilters: View {
+private struct HeatmapTimeFilters: View {
     var night: Bool
     @Binding var timeFilter: TimeFilter
-    @Binding var modeFilter: ModeFilter
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            filterLabel("Hora del día")
-            timeButtons
-
-            filterLabel("Transporte")
-                .padding(.top, 4)
-            modeButtons
-        }
-        .padding(.horizontal, 20)
-        .padding(.top, 20)
-    }
-
-    private func filterLabel(_ text: String) -> some View {
-        Text(text)
-            .font(.mono(11)).tracking(1)
-            .foregroundStyle(T.sec(night))
-            .textCase(.uppercase)
-    }
-
-    private var timeButtons: some View {
         HStack(spacing: 8) {
             ForEach(TimeFilter.allCases, id: \.rawValue) { filter in
-                HeatmapFilterButton(
+                HeatmapTimeButton(
                     label: filter.label,
                     icon: filter.icon,
                     selected: filter == timeFilter,
@@ -389,143 +352,39 @@ private struct HeatmapFilters: View {
                 }
             }
         }
-    }
-
-    private var modeButtons: some View {
-        HStack(spacing: 8) {
-            ForEach(ModeFilter.allCases, id: \.rawValue) { filter in
-                HeatmapFilterButton(
-                    label: filter.label,
-                    icon: filter.icon,
-                    selected: filter == modeFilter,
-                    night: night,
-                    compact: true
-                ) {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        modeFilter = filter
-                    }
-                }
-            }
-        }
+        .padding(.horizontal, 16)
+        .padding(.top, 12)
     }
 }
 
-private struct HeatmapFilterButton: View {
+private struct HeatmapTimeButton: View {
     var label: String
-    var icon: String?
+    var icon: String
     var selected: Bool
     var night: Bool
-    var compact = false
     var action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: compact ? 5 : 7) {
-                if let icon {
-                    Image(systemName: icon)
-                        .font(.system(size: compact ? 12 : 13, weight: .semibold))
-                }
-
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .semibold))
                 Text(label)
-                    .font(.system(size: compact ? 12 : 13, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .lineLimit(1)
                     .minimumScaleFactor(0.82)
             }
-            .foregroundStyle(foreground)
+            .foregroundStyle(selected ? T.cream : T.pri(night))
             .frame(maxWidth: .infinity)
-            .frame(height: 38)
-            .padding(.horizontal, compact ? 8 : 10)
-            .background(background, in: Capsule())
-            .overlay {
-                Capsule()
-                    .stroke(border, lineWidth: selected ? 1.2 : 1)
-            }
+            .frame(height: 36)
+            .padding(.horizontal, 8)
+            .background(selected ? T.ink : inactiveBackground, in: Capsule())
         }
         .buttonStyle(.plain)
     }
 
-    private var foreground: Color {
-        selected ? T.cream : T.pri(night)
-    }
-
-    private var background: Color {
-        if selected { return T.ink }
-        return night ? Color.white.opacity(0.07) : Color.black.opacity(0.05)
-    }
-
-    private var border: Color {
-        selected ? T.ink.opacity(0.65) : T.sec(night).opacity(0.16)
-    }
-}
-
-// MARK: - Insight card
-private struct HeatmapInsightCard: View {
-    var night: Bool
-    var signalCount: Int
-    var zone: HeatZone?
-    var isLoading: Bool
-    var errorMessage: String?
-    var vocab: SafetyVocab
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            iconBox
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Text(title)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(T.pri(night))
-                        .lineLimit(2)
-
-                    if let zone {
-                        SafetyBadge(level: zone.level, vocab: vocab, size: .sm)
-                    }
-                }
-
-                Text(subtitle)
-                    .font(.system(size: 12))
-                    .foregroundStyle(T.sec(night))
-                    .lineSpacing(2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer()
-        }
-        .padding(16)
-        .background(T.surface(night), in: RoundedRectangle(cornerRadius: 20))
-        .caminosCard()
-    }
-
-    private var title: String {
-        if let zone { return zone.title }
-        return isLoading ? "Calculando zonas" : "Sin lectura suficiente"
-    }
-
-    private var subtitle: String {
-        if let zone {
-            return "\(zone.detail) - riesgo \(zone.scoreLabel)."
-        }
-        if let errorMessage {
-            return errorMessage
-        }
-        return "\(signalCount.formatted()) reportes totales de la comunidad. Tu feedback está ayudando a mapear la seguridad en tiempo real."
-    }
-
-    private var iconBox: some View {
-        let level = zone?.level ?? .medium
-        let color = zone?.color ?? T.warn
-        let tint = level == .high ? T.safeTint : level == .medium ? T.warnTint : T.riskTint
-        let icon = level == .high ? "checkmark.shield.fill" : "exclamationmark.triangle.fill"
-
-        return RoundedRectangle(cornerRadius: 10)
-            .fill(tint)
-            .frame(width: 36, height: 36)
-            .overlay(
-                Image(systemName: isLoading ? "sparkle.magnifyingglass" : icon)
-                    .font(.system(size: 16))
-                    .foregroundStyle(color)
-            )
+    private var inactiveBackground: Color {
+        night ? Color.white.opacity(0.07) : Color.black.opacity(0.05)
     }
 }
 

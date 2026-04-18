@@ -943,6 +943,7 @@ private extension Array where Element == FSReport {
 extension TimeFilter {
     var representativeHour: Int {
         switch self {
+        case .all: 16
         case .morning: 8
         case .afternoon: 16
         case .night: 22
@@ -951,6 +952,7 @@ extension TimeFilter {
 
     var riskPrior: Double {
         switch self {
+        case .all: 0.46
         case .morning: 0.22
         case .afternoon: 0.34
         case .night: 0.82
@@ -960,6 +962,8 @@ extension TimeFilter {
     func contains(hour: Int) -> Bool {
         let normalized = (hour % 24 + 24) % 24
         switch self {
+        case .all:
+            return true
         case .morning:
             return (6..<12).contains(normalized)
         case .afternoon:
