@@ -17,6 +17,7 @@ struct ScreenHeatmap: View {
         )
     )
 
+
     private var night: Bool { router.night }
     private var zones: [HeatZone] { store.zones(timeFilter: timeFilter, modeFilter: modeFilter) }
     private var topZone: HeatZone? { store.topZone(timeFilter: timeFilter, modeFilter: modeFilter) }
