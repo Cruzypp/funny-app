@@ -1,5 +1,6 @@
 import FirebaseFirestore
 import Foundation
+import CoreLocation
 
 // MARK: - 1. Usuario
 struct FSUser: Codable {
@@ -72,6 +73,69 @@ enum TipoIncidente: String, Codable, CaseIterable {
     case zonaOscura   = "zona_oscura"
     case accidente    = "accidente"
     case otro         = "otro"
+}
+
+// MARK: - 3b. Datos de seguridad para mapa de calor
+struct FSReport: Identifiable, Equatable {
+    var id: String
+    var segmentId: String
+    var transportType: String
+    var hour: Int
+    var crowd: Double
+    var lighting: Double
+    var safety: Double
+    var lat: Double?
+    var lng: Double?
+    var timestamp: Timestamp?
+
+    var coordinate: CLLocationCoordinate2D? {
+        guard let lat, let lng else { return nil }
+        let coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lng)
+        return CLLocationCoordinate2DIsValid(coordinate) ? coordinate : nil
+    }
+}
+
+struct FSSegment: Identifiable, Equatable {
+    var id: String
+    var from: String
+    var to: String
+    var line: String
+    var reportsCount: Int
+    var riskScore: Double
+    var safetyLabel: String
+    var transportType: String
+    var lat: Double?
+    var lng: Double?
+
+    var title: String { "\(from) - \(to)" }
+
+    var coordinate: CLLocationCoordinate2D? {
+        guard let lat, let lng else { return nil }
+        let coordinate = CLLocationCoordinate2D(latitude: lat, longitude: lng)
+        return CLLocationCoordinate2DIsValid(coordinate) ? coordinate : nil
+    }
+}
+
+struct FSStation: Identifiable, Equatable {
+    var id: String
+    var name: String
+    var line: String
+    var type: String
+    var lat: Double
+    var lng: Double
+
+    var coordinate: CLLocationCoordinate2D {
+        CLLocationCoordinate2D(latitude: lat, longitude: lng)
+    }
+}
+
+struct FSHeatmapSnapshot {
+    var reports: [FSReport]
+    var segments: [FSSegment]
+    var stations: [FSStation]
+    var incidents: [FSIncident]
+
+    static let empty = FSHeatmapSnapshot(reports: [], segments: [], stations: [], incidents: [])
 }
 
 // MARK: - 4. Rutas
