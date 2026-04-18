@@ -1,4 +1,5 @@
 import SwiftUI
+import MapKit
 import Observation
 
 // MARK: - Safety vocabulary (three display modes)
@@ -49,17 +50,56 @@ final class AppRouter {
     var night: Bool = false
     var vocab: SafetyVocab = .colors
     let location = LocationManager()
+
+    // Origin: nil = usar GPS actual
+    var originCoordinate: CLLocationCoordinate2D? = nil
+    var originName: String = "Mi ubicación actual"
+    var originMapItem: MKMapItem? = nil
     
-    var contacts: [TrustedContact] = [
-        .init(name: "Mamá", phone: "5512345678", color: Color(hex: "E07856")),
-        .init(name: "Sofía", phone: "5587654321", color: Color(hex: "2E7D5B"))
-    ]
+    // Destination
+    var destCoordinate: CLLocationCoordinate2D? = nil
+    var destName: String = ""
+    var destMapItem: MKMapItem? = nil
+    
+    // Selected route from ScreenResults
+    var selectedRoute: MKRoute? = nil
+    var activeRouteContext: RouteReviewContext? = nil
+    var lastImpactSummary: RouteImpactSummary? = nil
+
+    var contacts: [TrustedContact] = []
 
     func go(_ s: AppScreen) {
         screen = s
     }
-    
-    func addContact(_ contact: TrustedContact) {
+
+    func addContact(_ contact: TrustedContact) async {
         contacts.append(contact)
+        
+        // Save to Firebase in background
+        Task {
+            do {
+                let userId = await FirebaseService.shared.currentUserId()
+                try await FirebaseService.shared.saveTrustedContact(userId: userId, contact: contact)
+            } catch {
+                print("Error saving contact to Firebase: \(error.localizedDescription)")
+                // Contact is still saved in memory, but log the error
+            }
+        }
+    }
+
+    func loadContacts() async {
+        do {
+            let userId = await FirebaseService.shared.currentUserId()
+            let loadedContacts = try await FirebaseService.shared.fetchTrustedContacts(userId: userId)
+            await MainActor.run {
+                self.contacts = loadedContacts
+            }
+        } catch {
+            print("Error loading contacts from Firebase: \(error.localizedDescription)")
+        }
+    }
+
+    func setActiveRouteContext(_ context: RouteReviewContext) {
+        activeRouteContext = context
     }
 }

@@ -54,34 +54,42 @@ struct EmergencySheet: View {
                     .foregroundStyle(T.sec(router.night))
                     .frame(maxWidth: .infinity, alignment: .leading)
                 
-                // Lista de contactos
-                ScrollView {
-                    VStack(spacing: 10) {
-                        ForEach(router.contacts) { contact in
-                            Button {
-                                callNumber(contact.phone)
-                            } label: {
-                                HStack {
-                                    Circle().fill(contact.color).frame(width: 32, height: 32)
-                                        .overlay(Text(String(contact.name.prefix(1))).foregroundStyle(.white).font(.system(size: 12, weight: .bold)))
-                                    
-                                    VStack(alignment: .leading) {
-                                        Text(contact.name)
-                                            .font(.system(size: 16, weight: .semibold))
-                                            .foregroundStyle(T.pri(router.night))
-                                        Text(contact.phone)
-                                            .font(.system(size: 13))
-                                            .foregroundStyle(T.sec(router.night))
+                if router.contacts.isEmpty {
+                    Text("Aun no has agregado contactos de confianza.")
+                        .font(.system(size: 14))
+                        .foregroundStyle(T.sec(router.night))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding()
+                        .background(T.surface(router.night), in: RoundedRectangle(cornerRadius: 14))
+                } else {
+                    ScrollView {
+                        VStack(spacing: 10) {
+                            ForEach(router.contacts) { contact in
+                                Button {
+                                    callNumber(contact.phone)
+                                } label: {
+                                    HStack {
+                                        Circle().fill(contact.color).frame(width: 32, height: 32)
+                                            .overlay(Text(String(contact.name.prefix(1))).foregroundStyle(.white).font(.system(size: 12, weight: .bold)))
+
+                                        VStack(alignment: .leading) {
+                                            Text(contact.name)
+                                                .font(.system(size: 16, weight: .semibold))
+                                                .foregroundStyle(T.pri(router.night))
+                                            Text(contact.phone)
+                                                .font(.system(size: 13))
+                                                .foregroundStyle(T.sec(router.night))
+                                        }
+                                        Spacer()
+                                        Image(systemName: "phone.circle.fill")
+                                            .font(.system(size: 24))
+                                            .foregroundStyle(T.safe)
                                     }
-                                    Spacer()
-                                    Image(systemName: "phone.circle.fill")
-                                        .font(.system(size: 24))
-                                        .foregroundStyle(T.safe)
+                                    .padding()
+                                    .background(T.surface(router.night), in: RoundedRectangle(cornerRadius: 14))
                                 }
-                                .padding()
-                                .background(T.surface(router.night), in: RoundedRectangle(cornerRadius: 14))
+                                .buttonStyle(.plain)
                             }
-                            .buttonStyle(.plain)
                         }
                     }
                 }
@@ -122,7 +130,13 @@ struct EmergencySheet: View {
     
     private func callNumber(_ phone: String) {
         stopTimer()
-        let cleanPhone = phone.filter { "0123456789".contains($0) }
+        var cleanPhone = phone.filter { "0123456789".contains($0) }
+        
+        // Remove country code (+52 or 52) if present
+        if cleanPhone.hasPrefix("52") && cleanPhone.count > 10 {
+            cleanPhone = String(cleanPhone.dropFirst(2))
+        }
+        
         if let url = URL(string: "tel://\(cleanPhone)") {
             UIApplication.shared.open(url)
         }

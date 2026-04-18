@@ -1,4 +1,5 @@
 import SwiftUI
+import MapKit
 
 struct ScreenDetail: View {
     @Environment(AppRouter.self) var router
@@ -6,29 +7,110 @@ struct ScreenDetail: View {
 
     private var night: Bool { router.night }
 
-    private let segments: [RouteSegment] = [
+    private var segments: [RouteSegment] {
+        // If there's a real route, derive segments from its steps
+        if let route = router.selectedRoute, route.steps.count >= 2 {
+            return routeStepsToSegments(route)
+        }
+        return cdmxDemoSegments
+    }
+
+    private func routeStepsToSegments(_ route: MKRoute) -> [RouteSegment] {
+        let usableSteps = route.steps.filter { !$0.instructions.isEmpty }
+        guard !usableSteps.isEmpty else { return cdmxDemoSegments }
+        return usableSteps.prefix(4).enumerated().map { i, step in
+            let mode = stepMode(for: step.instructions)
+            let proportionalDuration = route.distance > 0
+                ? Int((route.expectedTravelTime * (step.distance / route.distance)) / 60)
+                : 0
+            let mins = max(1, proportionalDuration)
+            let distStr = step.distance < 1000
+                ? "\(Int(step.distance)) m"
+                : String(format: "%.1f km", step.distance / 1000)
+            let isLast = i == usableSteps.prefix(4).count - 1
+            return RouteSegment(
+                sfSymbol: mode.sfSymbol,
+                mode: mode.label,
+                duration: "\(mins) min",
+                distance: distStr,
+                from: i == 0 ? (router.originName) : "Tramo \(i + 1)",
+                to: isLast ? (router.destName.isEmpty ? "Destino" : router.destName) : "Continuar",
+                safety: mode.safety,
+                notes: stepNotes(for: i, mode: mode.kind)
+            )
+        }
+    }
+
+    private func stepNotes(for index: Int, mode: TransitMode) -> [SegmentNote] {
+        let walkNotes: [[SegmentNote]] = [
+            [
+                .init(sfSymbol: "lightbulb.fill", text: "Zona bien iluminada",         tone: .positive),
+                .init(sfSymbol: "person.2.fill",  text: "Alta afluencia de personas",   tone: .positive),
+            ],
+            [
+                .init(sfSymbol: "shield.fill",    text: "Área comercial con vigilancia", tone: .positive),
+            ],
+            [
+                .init(sfSymbol: "lightbulb",      text: "Iluminación moderada",          tone: .caution),
+            ],
+            [
+                .init(sfSymbol: "exclamationmark.triangle.fill",
+                                                  text: "Reportes nocturnos recientes",  tone: .caution),
+            ],
+        ]
+
+        let transitNotes: [TransitMode: [SegmentNote]] = [
+            .metro: [
+                .init(sfSymbol: "tram.fill", text: "Tramo principal en transporte público", tone: .positive),
+                .init(sfSymbol: "person.2.fill", text: "Mayor flujo de personas", tone: .positive),
+            ],
+            .bus: [
+                .init(sfSymbol: "bus.fill", text: "Ruta con transbordo en bus", tone: .positive),
+                .init(sfSymbol: "clock.fill", text: "Considera tiempos de espera", tone: .caution),
+            ],
+            .walk: walkNotes[min(index, walkNotes.count - 1)]
+        ]
+
+        return transitNotes[mode] ?? walkNotes[min(index, walkNotes.count - 1)]
+    }
+
+    private func stepMode(for instructions: String) -> (kind: TransitMode, label: String, sfSymbol: String, safety: SafetyLevel) {
+        let normalized = instructions.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+
+        if normalized.contains("metro") || normalized.contains("subway") || normalized.contains("tram") {
+            return (.metro, "Metro", "tram.fill", .high)
+        }
+        if normalized.contains("bus") || normalized.contains("autobus") || normalized.contains("camion") {
+            return (.bus, "Bus", "bus.fill", .medium)
+        }
+        return (.walk, "Caminar", "figure.walk", .high)
+    }
+
+    private let cdmxDemoSegments: [RouteSegment] = [
         .init(sfSymbol: "figure.walk",
-              mode: "Caminar", duration: "5 min", distance: "380 m",
-              from: "Roma Sur", to: "Metrobús Álvaro Obregón",
+              mode: "Caminar", duration: "6 min", distance: "450 m",
+              from: "Bellas Artes", to: "Metro Juárez",
               safety: .high,
               notes: [
-                .init(sfSymbol: "lightbulb.fill", text: "Avenida bien iluminada",        tone: .positive),
-                .init(sfSymbol: "person.2.fill",  text: "Alta afluencia de personas",    tone: .positive),
-              ]),
-        .init(sfSymbol: "tram.fill",
-              mode: "Metrobús · Línea 1", duration: "14 min", distance: "6 paradas",
-              from: "Álvaro Obregón", to: "Sonora",
-              safety: .high,
-              notes: [
-                .init(sfSymbol: "shield.fill", text: "Vagón con vigilancia", tone: .positive),
+                .init(sfSymbol: "lightbulb.fill", text: "Corredor bien iluminado",        tone: .positive),
+                .init(sfSymbol: "person.2.fill",  text: "Alta afluencia peatonal",        tone: .positive),
               ]),
         .init(sfSymbol: "figure.walk",
-              mode: "Caminar", duration: "5 min", distance: "310 m",
-              from: "Sonora", to: "Cafebrería El Péndulo",
+              mode: "Caminar", duration: "12 min", distance: "900 m",
+              from: "Metro Juárez", to: "Insurgentes",
+              safety: .high,
+              notes: [
+                .init(sfSymbol: "shield.fill",    text: "Zona con cámaras y comercio",    tone: .positive),
+                .init(sfSymbol: "tram.fill",      text: "Conexión directa a transporte",  tone: .positive),
+              ]),
+        .init(sfSymbol: "figure.walk",
+              mode: "Caminar", duration: "4 min", distance: "280 m",
+              from: "Insurgentes", to: "Destino",
               safety: .medium,
               notes: [
-                .init(sfSymbol: "lightbulb", text: "Iluminación moderada en Álvaro Obregón",         tone: .caution),
-                .init(sfSymbol: "exclamationmark.triangle.fill", text: "Zona con reportes recientes después de 22:00", tone: .caution),
+                .init(sfSymbol: "lightbulb",      text: "Iluminación moderada de noche",   tone: .caution),
+                .init(sfSymbol: "exclamationmark.triangle.fill",
+                                                  text: "Reportes recientes después de 22:00", tone: .caution),
               ]),
     ]
 
@@ -39,9 +121,9 @@ struct ScreenDetail: View {
                     // Header
                     ScreenHeader(
                         supertitle: "Ruta segura",
-                        title: "Roma Sur → El Péndulo",
+                        title: "\(router.originName.replacingOccurrences(of: "Mi ubicación actual", with: "Origen")) → \(router.destName.isEmpty ? "Destino" : router.destName)",
                         night: night,
-                        onBack: { router.go(.results(dest: "Cafebrería El Péndulo")) },
+                        onBack: { router.go(.results(dest: router.destName.isEmpty ? "Destino" : router.destName)) },
                         trailing: AnyView(
                             Button {  } label: {
                                 Image(systemName: "heart")
@@ -91,7 +173,7 @@ struct ScreenDetail: View {
             HStack(alignment: .bottom, spacing: 24) {
                 // Large time
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text("24")
+                    Text("\(totalMinutes)")
                         .font(.serif(54))
                         .foregroundStyle(T.pri(night))
                     Text("min")
@@ -107,7 +189,7 @@ struct ScreenDetail: View {
                             .font(.system(size: 13))
                             .foregroundStyle(T.sec(night))
                     }
-                    Text("Llegas aprox. **7:11 PM**")
+                    Text("Llegas aprox. **\(arrivalTime())**")
                         .font(.system(size: 13))
                         .foregroundStyle(T.sec(night))
                 }
@@ -229,6 +311,21 @@ struct ScreenDetail: View {
         }
         .padding(.horizontal, 20)
         .padding(.bottom, isLast ? 0 : 22)
+    }
+
+    // MARK: Helpers
+    private var totalMinutes: Int {
+        if let route = router.selectedRoute {
+            return max(1, Int(route.expectedTravelTime / 60))
+        }
+        return cdmxDemoSegments.compactMap { Int($0.duration.components(separatedBy: " ").first ?? "0") }.reduce(0, +)
+    }
+
+    private func arrivalTime() -> String {
+        let arrival = Date().addingTimeInterval(Double(totalMinutes) * 60)
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm a"
+        return formatter.string(from: arrival)
     }
 }
 
