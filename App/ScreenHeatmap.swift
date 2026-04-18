@@ -1,15 +1,18 @@
 import SwiftUI
 import MapKit
+import FirebaseFirestore
 
 // MARK: - Main screen
 struct ScreenHeatmap: View {
     @Environment(AppRouter.self) var router
     @State private var timeFilter: TimeFilter = .night
     @State private var modeFilter: ModeFilter = .all
+    @State private var reportCount: Int = 0
+    @State private var isLoading = true
     @State private var cameraPosition: MapCameraPosition = .region(
         MKCoordinateRegion(
-            center: CLLocationCoordinate2D(latitude: 19.4300, longitude: -99.1332),
-            span: MKCoordinateSpan(latitudeDelta: 0.10, longitudeDelta: 0.10)
+            center: LocationManager.defaultCityCenter,
+            span: MKCoordinateSpan(latitudeDelta: 0.12, longitudeDelta: 0.12)
         )
     )
 
@@ -17,7 +20,7 @@ struct ScreenHeatmap: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HeatmapHeader(night: night, onBack: { router.go(.home) })
+            HeatmapHeader(night: night, reportCount: reportCount, onBack: { router.go(.home) })
 
             ScrollView {
                 VStack(spacing: 0) {
@@ -29,7 +32,7 @@ struct ScreenHeatmap: View {
                     HeatmapFilters(night: night,
                                    timeFilter: $timeFilter,
                                    modeFilter: $modeFilter)
-                    HeatmapInsightCard(night: night)
+                    HeatmapInsightCard(night: night, reportCount: reportCount)
                         .padding(.horizontal, 16)
                         .padding(.top, 16)
                         .padding(.bottom, 40)
@@ -38,6 +41,22 @@ struct ScreenHeatmap: View {
             .scrollIndicators(.hidden)
         }
         .background(T.bg(night))
+        .task {
+            await loadRealData()
+        }
+    }
+    
+    private func loadRealData() async {
+        isLoading = true
+        do {
+            let db = Firestore.firestore()
+            let snapshot = try await db.collection("route_reviews").getDocuments()
+            self.reportCount = snapshot.count
+        } catch {
+            print("Error fetching reports: \(error)")
+            self.reportCount = 0
+        }
+        isLoading = false
     }
 }
 
@@ -54,29 +73,28 @@ enum TimeFilter: String, CaseIterable {
         switch self { case .morning, .afternoon: "sun.max.fill"; case .night: "moon.fill" }
     }
 
-    // Real CDMX neighborhood coordinates with radius in meters
     var zones: [HeatZone] {
         switch self {
         case .morning:
             return [
-                .init(center: CLLocationCoordinate2D(latitude: 19.4450, longitude: -99.1240), radius: 600, level: .high,   opacity: 0.35),  // Tepito
-                .init(center: CLLocationCoordinate2D(latitude: 19.4220, longitude: -99.1200), radius: 700, level: .high,   opacity: 0.30),  // La Merced
-                .init(center: CLLocationCoordinate2D(latitude: 19.4320, longitude: -99.1470), radius: 500, level: .medium, opacity: 0.30),  // Guerrero
+                .init(center: CLLocationCoordinate2D(latitude: 19.4326, longitude: -99.1332), radius: 700, level: .high,   opacity: 0.35),
+                .init(center: CLLocationCoordinate2D(latitude: 19.4236, longitude: -99.1637), radius: 600, level: .high,   opacity: 0.30),
+                .init(center: CLLocationCoordinate2D(latitude: 19.4114, longitude: -99.1716), radius: 500, level: .medium, opacity: 0.28),
             ]
         case .afternoon:
             return [
-                .init(center: CLLocationCoordinate2D(latitude: 19.4450, longitude: -99.1240), radius: 600, level: .high,   opacity: 0.30),
-                .init(center: CLLocationCoordinate2D(latitude: 19.4220, longitude: -99.1200), radius: 700, level: .high,   opacity: 0.35),
-                .init(center: CLLocationCoordinate2D(latitude: 19.4320, longitude: -99.1470), radius: 500, level: .medium, opacity: 0.35),
-                .init(center: CLLocationCoordinate2D(latitude: 19.4150, longitude: -99.1480), radius: 450, level: .medium, opacity: 0.30),  // Doctores
+                .init(center: CLLocationCoordinate2D(latitude: 19.4326, longitude: -99.1332), radius: 700, level: .high,   opacity: 0.30),
+                .init(center: CLLocationCoordinate2D(latitude: 19.4236, longitude: -99.1637), radius: 600, level: .high,   opacity: 0.35),
+                .init(center: CLLocationCoordinate2D(latitude: 19.4114, longitude: -99.1716), radius: 500, level: .medium, opacity: 0.30),
+                .init(center: CLLocationCoordinate2D(latitude: 19.3494, longitude: -99.1617), radius: 450, level: .medium, opacity: 0.28),
             ]
         case .night:
             return [
-                .init(center: CLLocationCoordinate2D(latitude: 19.4450, longitude: -99.1240), radius: 700, level: .low,    opacity: 0.45),
-                .init(center: CLLocationCoordinate2D(latitude: 19.4220, longitude: -99.1200), radius: 800, level: .low,    opacity: 0.50),
-                .init(center: CLLocationCoordinate2D(latitude: 19.4320, longitude: -99.1470), radius: 550, level: .medium, opacity: 0.40),
-                .init(center: CLLocationCoordinate2D(latitude: 19.4150, longitude: -99.1480), radius: 500, level: .low,    opacity: 0.40),  // Doctores
-                .init(center: CLLocationCoordinate2D(latitude: 19.4100, longitude: -99.1650), radius: 400, level: .medium, opacity: 0.35),  // Roma/Condesa
+                .init(center: CLLocationCoordinate2D(latitude: 19.4236, longitude: -99.1637), radius: 800, level: .low,    opacity: 0.50),
+                .init(center: CLLocationCoordinate2D(latitude: 19.4114, longitude: -99.1716), radius: 700, level: .low,    opacity: 0.45),
+                .init(center: CLLocationCoordinate2D(latitude: 19.4342, longitude: -99.2099), radius: 550, level: .low,    opacity: 0.40),
+                .init(center: CLLocationCoordinate2D(latitude: 19.4326, longitude: -99.1332), radius: 500, level: .medium, opacity: 0.35),
+                .init(center: CLLocationCoordinate2D(latitude: 19.4200, longitude: -99.1700), radius: 400, level: .medium, opacity: 0.40),
             ]
         }
     }
@@ -111,6 +129,7 @@ enum ModeFilter: String, CaseIterable {
 // MARK: - Header
 private struct HeatmapHeader: View {
     var night: Bool
+    var reportCount: Int
     var onBack: () -> Void
 
     var body: some View {
@@ -120,7 +139,7 @@ private struct HeatmapHeader: View {
             night: night,
             onBack: onBack,
             trailing: AnyView(
-                Text("2,089 reportes")
+                Text("\(reportCount) reportes")
                     .font(.mono(11)).tracking(0.3)
                     .foregroundStyle(T.sec(night))
                     .padding(.horizontal, 10).padding(.vertical, 6)
@@ -250,40 +269,10 @@ private struct TimeFilterButton: View {
     }
 }
 
-private struct ModeFilterButton: View {
-    var filter: ModeFilter
-    var selected: ModeFilter
-    var night: Bool
-    var action: () -> Void
-
-    private var on: Bool { filter == selected }
-
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 4) {
-                if let icon = filter.icon {
-                    Image(systemName: icon).font(.system(size: 12))
-                }
-                Text(filter.label).font(.system(size: 12, weight: .medium))
-            }
-            .foregroundStyle(on ? T.bg(night) : T.pri(night))
-            .frame(maxWidth: .infinity)
-            .frame(height: 44)
-            .background(on ? T.pri(night) : Color.clear, in: Capsule())
-            .overlay(
-                Capsule().stroke(
-                    on ? Color.clear : (night ? Color.white.opacity(0.10) : Color.black.opacity(0.14)),
-                    lineWidth: 1.5
-                )
-            )
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 // MARK: - Insight card
 private struct HeatmapInsightCard: View {
     var night: Bool
+    var reportCount: Int
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -297,10 +286,10 @@ private struct HeatmapInsightCard: View {
                 )
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("Álvaro Obregón · Sonora")
+                Text("Ciudad de México")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(T.pri(night))
-                Text("312 reportes · caminar · 22–02h · percepción bajó 8 pts esta semana.")
+                Text("\(reportCount) reportes totales de la comunidad. Tu feedback está ayudando a mapear la seguridad en tiempo real.")
                     .font(.system(size: 12))
                     .foregroundStyle(T.sec(night))
                     .lineSpacing(2)
