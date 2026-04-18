@@ -8,70 +8,55 @@ struct ScreenImpact: View {
     @State private var checkOpacity: Double = 0
 
     private var night: Bool { router.night }
-    private var summary: RouteImpactSummary {
-        router.lastImpactSummary ?? fallbackSummary
-    }
-
-    private var fallbackSummary: RouteImpactSummary {
-        RouteImpactSummary(
-            routeTitle: router.destName.isEmpty ? "Tu ruta" : router.destName,
-            routeLabel: "Reporte pendiente",
-            previousAverage: 0,
-            currentAverage: 0,
-            totalReviews: 0,
-            myReviewsThisMonth: 0,
-            reportedTags: [],
-            communityTags: [],
-            submittedAt: Date(),
-            submittedSafetyScore: 0,
-            submittedLightingScore: nil,
-            transportModes: router.activeRouteContext?.transportModes ?? [.walk],
-            savedRemotely: false
-        )
-    }
+    private var summary: RouteImpactSummary? { router.lastImpactSummary }
 
     private var scoreDelta: Int {
-        summary.currentAverage - summary.previousAverage
+        guard let summary else { return 0 }
+        return summary.currentAverage - summary.previousAverage
     }
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            ScrollView {
-                ZStack(alignment: .top) {
-                    RadialGradient(
-                        colors: [T.safe.opacity(0.13), Color.clear],
-                        center: .top,
-                        startRadius: 0,
-                        endRadius: 300
-                    )
-                    .frame(height: 420)
-                    .frame(maxWidth: .infinity)
+            if let summary {
+                ScrollView {
+                    ZStack(alignment: .top) {
+                        RadialGradient(
+                            colors: [T.safe.opacity(0.13), Color.clear],
+                            center: .top,
+                            startRadius: 0,
+                            endRadius: 300
+                        )
+                        .frame(height: 420)
+                        .frame(maxWidth: .infinity)
 
-                    VStack(spacing: 0) {
-                        heroSection
-                        scoreCard
-                            .padding(.horizontal, 16)
-                            .padding(.top, 36)
-                        statsRow
-                            .padding(.horizontal, 16)
-                            .padding(.top, 18)
-                        highlightsCard
-                            .padding(.horizontal, 16)
-                            .padding(.top, 18)
-                        ctaSection
-                            .padding(.horizontal, 16)
-                            .padding(.top, 24)
-                        Color.clear.frame(height: 60)
+                        VStack(spacing: 0) {
+                            heroSection(summary: summary)
+                            scoreCard(summary: summary)
+                                .padding(.horizontal, 16)
+                                .padding(.top, 36)
+                            statsRow(summary: summary)
+                                .padding(.horizontal, 16)
+                                .padding(.top, 18)
+                            highlightsCard(summary: summary)
+                                .padding(.horizontal, 16)
+                                .padding(.top, 18)
+                            ctaSection
+                                .padding(.horizontal, 16)
+                                .padding(.top, 24)
+                            Color.clear.frame(height: 60)
+                        }
                     }
                 }
+                .scrollIndicators(.hidden)
+            } else {
+                emptyState
             }
-            .scrollIndicators(.hidden)
         }
         .background(T.bg(night))
         .onAppear { runAnimations() }
     }
 
-    private var heroSection: some View {
+    private func heroSection(summary: RouteImpactSummary) -> some View {
         VStack(spacing: 28) {
             ZStack {
                 Circle()
@@ -93,7 +78,7 @@ struct ScreenImpact: View {
             .opacity(checkOpacity)
 
             VStack(spacing: 10) {
-                Text(summary.savedRemotely ? "Reporte guardado." : "Reporte guardado localmente.")
+                Text("Reporte guardado.")
                     .font(.serif(34))
                     .foregroundStyle(T.pri(night))
                 Text(summary.routeTitle)
@@ -102,7 +87,7 @@ struct ScreenImpact: View {
                     .multilineTextAlignment(.center)
             }
 
-            Text(heroCopy)
+            Text(heroCopy(summary: summary))
                 .font(.system(size: 15))
                 .foregroundStyle(T.sec(night))
                 .multilineTextAlignment(.center)
@@ -111,11 +96,7 @@ struct ScreenImpact: View {
         .padding(.top, 100)
     }
 
-    private var heroCopy: String {
-        if summary.totalReviews == 0 {
-            return "Tu reseña quedó lista para sincronizarse cuando haya conexión."
-        }
-
+    private func heroCopy(summary: RouteImpactSummary) -> String {
         if summary.totalReviews == 1 {
             return "Esta es la primera reseña registrada para este trayecto."
         }
@@ -123,7 +104,7 @@ struct ScreenImpact: View {
         return "Tu reseña se sumó a \(summary.totalReviews) evaluaciones recientes de esta ruta."
     }
 
-    private var scoreCard: some View {
+    private func scoreCard(summary: RouteImpactSummary) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(summary.routeLabel.uppercased())
                 .font(.mono(11)).tracking(1)
@@ -170,7 +151,7 @@ struct ScreenImpact: View {
                     .padding(.vertical, 4)
                     .background(scoreDelta >= 0 ? T.safeTint : T.riskTint, in: Capsule())
 
-                Text(deltaDescription)
+                Text(deltaDescription(summary: summary))
                     .font(.system(size: 13))
                     .foregroundStyle(T.sec(night))
                     .fixedSize(horizontal: false, vertical: true)
@@ -186,7 +167,7 @@ struct ScreenImpact: View {
         return scoreDelta > 0 ? "+\(scoreDelta) PTS" : "\(scoreDelta) PTS"
     }
 
-    private var deltaDescription: String {
+    private func deltaDescription(summary: RouteImpactSummary) -> String {
         if summary.previousAverage == 0 && summary.currentAverage > 0 {
             return "Ya hay una base inicial de percepción para este trayecto."
         }
@@ -198,7 +179,7 @@ struct ScreenImpact: View {
             : "Tu reseña bajó la percepción de seguridad y ayuda a alertar a la comunidad."
     }
 
-    private var statsRow: some View {
+    private func statsRow(summary: RouteImpactSummary) -> some View {
         HStack(spacing: 10) {
             statCard(value: "\(summary.totalReviews)", label: "reportes en\nesta ruta")
             statCard(value: "\(summary.myReviewsThisMonth)", label: "reportes tuyos\neste mes")
@@ -221,7 +202,7 @@ struct ScreenImpact: View {
         .caminosCard()
     }
 
-    private var highlightsCard: some View {
+    private func highlightsCard(summary: RouteImpactSummary) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             row(title: "Tu calificación", value: "\(summary.submittedSafetyScore)/5 en seguridad")
 
@@ -229,8 +210,8 @@ struct ScreenImpact: View {
                 row(title: "Iluminación", value: "\(lighting)/5")
             }
 
-            row(title: "Modo", value: transportModesText)
-            row(title: "Enviado", value: submittedAtText)
+            row(title: "Modo", value: transportModesText(summary: summary))
+            row(title: "Enviado", value: submittedAtText(summary: summary))
 
             if !summary.reportedTags.isEmpty {
                 chips(title: "Lo que reportaste", values: summary.reportedTags)
@@ -238,12 +219,6 @@ struct ScreenImpact: View {
 
             if !summary.communityTags.isEmpty {
                 chips(title: "Se repite en la comunidad", values: summary.communityTags)
-            }
-
-            if !summary.savedRemotely {
-                Text("Se guardó en este dispositivo y se puede volver a sincronizar después.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(T.warn)
             }
         }
         .padding(18)
@@ -285,7 +260,7 @@ struct ScreenImpact: View {
         }
     }
 
-    private var transportModesText: String {
+    private func transportModesText(summary: RouteImpactSummary) -> String {
         let labels = summary.transportModes.map { mode -> String in
             switch mode {
             case .walk: return "Caminar"
@@ -296,11 +271,30 @@ struct ScreenImpact: View {
         return labels.isEmpty ? "Sin dato" : labels.joined(separator: " + ")
     }
 
-    private var submittedAtText: String {
+    private func submittedAtText(summary: RouteImpactSummary) -> String {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return formatter.string(from: summary.submittedAt)
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 18) {
+            Spacer()
+            Text("Sin datos de reporte")
+                .font(.serif(34))
+                .foregroundStyle(T.pri(night))
+            Text("Esta pantalla solo muestra información confirmada desde la base de datos.")
+                .font(.system(size: 15))
+                .foregroundStyle(T.sec(night))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+            CaminosButton(label: "Volver al inicio", variant: .ghost) {
+                router.go(.home)
+            }
+            .padding(.horizontal, 16)
+            Spacer()
+        }
     }
 
     private var ctaSection: some View {
@@ -315,6 +309,11 @@ struct ScreenImpact: View {
     }
 
     private func runAnimations() {
+        guard let summary else {
+            displayedScore = 0
+            return
+        }
+
         withAnimation(.spring(response: 0.5, dampingFraction: 0.6).delay(0.1)) {
             checkScale = 1.0
             checkOpacity = 1.0
@@ -342,7 +341,7 @@ struct ScreenImpact: View {
     let router = AppRouter()
     router.lastImpactSummary = RouteImpactSummary(
         routeTitle: "Parque México",
-        routeLabel: "Ruta más segura",
+        routeLabel: "Riesgo medio",
         previousAverage: 3,
         currentAverage: 4,
         totalReviews: 8,

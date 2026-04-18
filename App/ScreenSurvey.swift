@@ -111,7 +111,7 @@ struct ScreenSurvey: View {
 
                     Button {
                         router.lastImpactSummary = nil
-                        router.go(.impact)
+                        router.go(.home)
                     } label: {
                         Text("Omitir")
                             .font(.system(size: 13))
@@ -250,8 +250,8 @@ struct ScreenSurvey: View {
             router.go(.impact)
         } catch {
             router.activeRouteContext = context
-            router.lastImpactSummary = fallbackImpactSummary(for: context)
-            router.go(.impact)
+            router.lastImpactSummary = nil
+            submitError = "No se pudo guardar el reporte en la base de datos. Intenta nuevamente."
         }
 
         isSubmitting = false
@@ -278,25 +278,6 @@ struct ScreenSurvey: View {
         )
     }
 
-    private func fallbackImpactSummary(for context: RouteReviewContext) -> RouteImpactSummary {
-        RouteImpactSummary(
-            routeTitle: context.destinationName,
-            routeLabel: context.routeLabel,
-            previousAverage: safetyScore,
-            currentAverage: safetyScore,
-            totalReviews: 1,
-            myReviewsThisMonth: 1,
-            reportedTags: availableQuickTags
-                .filter { selectedTags.contains($0.id) }
-                .map(\.label),
-            communityTags: [],
-            submittedAt: Date(),
-            submittedSafetyScore: safetyScore,
-            submittedLightingScore: shouldAskLighting ? lightingScore : nil,
-            transportModes: context.transportModes,
-            savedRemotely: false
-        )
-    }
 }
 
 // MARK: - Simple flow layout

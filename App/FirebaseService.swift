@@ -256,26 +256,28 @@ extension FirebaseService {
         lightingScore: Int?,
         tags: Set<String>
     ) async throws -> RouteImpactSummary {
+        let persistedContext = await persistRouteContext(context)
         let userId = await currentUserId()
-        let previousReviews = (try? await fetchRouteReviews(routeKey: context.routeKey)) ?? []
+        let previousReviews = (try? await fetchRouteReviews(routeKey: persistedContext.routeKey)) ?? []
+        let previousAverage = averageScore(for: previousReviews, fallback: safetyScore)
 
-        let destinationLat = context.destinationCoordinate?.latitude ?? context.path.last?.latitude
-        let destinationLng = context.destinationCoordinate?.longitude ?? context.path.last?.longitude
+        let destinationLat = persistedContext.destinationCoordinate?.latitude ?? persistedContext.path.last?.latitude
+        let destinationLng = persistedContext.destinationCoordinate?.longitude ?? persistedContext.path.last?.longitude
 
         let review = FSRouteReview(
-            routeId: context.routeId,
-            routeKey: context.routeKey,
+            routeId: persistedContext.routeId,
+            routeKey: persistedContext.routeKey,
             userId: userId,
-            originName: context.originName,
-            destinationName: context.destinationName,
-            routeLabel: context.routeLabel,
-            transportModes: context.transportModes.map(\.rawValue),
+            originName: persistedContext.originName,
+            destinationName: persistedContext.destinationName,
+            routeLabel: persistedContext.routeLabel,
+            transportModes: persistedContext.transportModes.map(\.rawValue),
             safetyScore: safetyScore,
             lightingScore: lightingScore,
             tags: Array(tags).sorted(),
             destinationLat: destinationLat,
             destinationLng: destinationLng,
-            startedAt: Timestamp(date: context.startedAt),
+            startedAt: Timestamp(date: persistedContext.startedAt),
             submittedAt: Timestamp(date: Date())
         )
 
@@ -286,13 +288,16 @@ extension FirebaseService {
         }
 
         let updatedReviews = previousReviews + [review]
+        let currentAverage = averageScore(for: updatedReviews, fallback: safetyScore)
         let userReviews = (try? await fetchUserRouteReviews(userId: userId)) ?? updatedReviews.filter { $0.userId == userId }
 
+        try? await updateRouteRisk(routeId: persistedContext.routeId, averageSafety: currentAverage)
+
         return RouteImpactSummary(
-            routeTitle: context.destinationName,
-            routeLabel: context.routeLabel,
-            previousAverage: averageScore(for: previousReviews, fallback: safetyScore),
-            currentAverage: averageScore(for: updatedReviews, fallback: safetyScore),
+            routeTitle: persistedContext.destinationName,
+            routeLabel: routeDangerLabel(forAverageSafety: currentAverage),
+            previousAverage: previousAverage,
+            currentAverage: currentAverage,
             totalReviews: updatedReviews.count,
             myReviewsThisMonth: reviewsThisMonth(userReviews),
             reportedTags: tagLabels(for: review.tags),
@@ -300,7 +305,7 @@ extension FirebaseService {
             submittedAt: review.submittedAt.dateValue(),
             submittedSafetyScore: safetyScore,
             submittedLightingScore: lightingScore,
-            transportModes: context.transportModes,
+            transportModes: persistedContext.transportModes,
             savedRemotely: true
         )
     }
@@ -358,6 +363,14 @@ extension FirebaseService {
         guard !reviews.isEmpty else { return fallback }
         let total = reviews.reduce(0) { $0 + $1.safetyScore }
         return Int((Double(total) / Double(reviews.count)).rounded())
+    }
+
+    private func updateRouteRisk(routeId: String?, averageSafety: Int) async throws {
+        guard let routeId, !routeId.isEmpty else { return }
+
+        try await db.collection("routes")
+            .document(routeId)
+            .updateData(["nivel_riesgo": routeDangerStorageValue(forAverageSafety: averageSafety)])
     }
 
     private func topTagLabels(from reviews: [FSRouteReview]) -> [String] {

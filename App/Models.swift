@@ -93,6 +93,30 @@ struct RouteImpactSummary {
     var savedRemotely: Bool
 }
 
+func routeDangerStorageValue(forAverageSafety averageSafety: Int) -> String {
+    switch averageSafety {
+    case 4...:
+        return "bajo"
+    case 3:
+        return "medio"
+    default:
+        return "alto"
+    }
+}
+
+func routeDangerLabel(forAverageSafety averageSafety: Int) -> String {
+    guard averageSafety > 0 else { return "Sin reportes" }
+
+    switch routeDangerStorageValue(forAverageSafety: averageSafety) {
+    case "bajo":
+        return "Riesgo bajo"
+    case "medio":
+        return "Riesgo medio"
+    default:
+        return "Riesgo alto"
+    }
+}
+
 func makeRouteKey(origin: String, destination: String) -> String {
     func normalize(_ text: String) -> String {
         let folded = text.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
