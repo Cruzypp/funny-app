@@ -9,7 +9,6 @@ struct AddressResult: Identifiable {
     let title: String
     let subtitle: String
     let coordinate: CLLocationCoordinate2D?
-    let placeId: String?
 }
 
 // MARK: - Location + search manager
@@ -17,7 +16,6 @@ struct AddressResult: Identifiable {
 @Observable
 final class LocationManager: NSObject {
     private let manager = CLLocationManager()
-    private let googleApiKey = "TU_API_KEY_AQUI" // <--- PON TU API KEY DE GOOGLE AQUÍ
 
     var userLocation: CLLocation?
     var isAuthorized = false
@@ -26,6 +24,10 @@ final class LocationManager: NSObject {
 
     // CDMX default region used for search bias
     static let cdmxCenter = CLLocationCoordinate2D(latitude: 19.4326, longitude: -99.1332)
+    static let cdmxRegion = MKCoordinateRegion(
+        center: cdmxCenter,
+        span: MKCoordinateSpan(latitudeDelta: 0.35, longitudeDelta: 0.35)
+    )
 
     override init() {
         super.init()
@@ -46,7 +48,7 @@ final class LocationManager: NSObject {
         manager.stopUpdatingLocation()
     }
 
-    // MARK: - Google Places Search
+    // MARK: - Apple Maps Search (MKLocalSearch)
     func search(query: String) async {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else {
@@ -56,28 +58,24 @@ final class LocationManager: NSObject {
         
         isSearching = true
         
-        let urlString = "https://maps.googleapis.com/maps/api/place/autocomplete/json?input=\(query)&key=\(googleApiKey)&components=country:mx&language=es"
-        
-        guard let url = URL(string: urlString.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "") else {
-            isSearching = false
-            return
-        }
-        
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = trimmed
+        request.region = LocationManager.cdmxRegion // Prioriza resultados en CDMX
+
         do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            let response = try JSONDecoder().decode(GooglePredictionsResponse.self, from: data)
+            let search = MKLocalSearch(request: request)
+            let response = try await search.start()
             
-            self.searchResults = response.predictions.map { pred in
+            self.searchResults = response.mapItems.map { item in
                 AddressResult(
-                    title: pred.structuredFormatting.mainText,
-                    subtitle: pred.structuredFormatting.secondaryText ?? "",
-                    coordinate: nil, // Google Autocomplete no da coordenadas directamente, se necesita "Place Details" después
-                    placeId: pred.placeId
+                    title: item.name ?? "Sin nombre",
+                    subtitle: item.placemark.title ?? "",
+                    coordinate: item.placemark.coordinate
                 )
             }
             isSearching = false
         } catch {
-            print("Google Places Error: \(error)")
+            print("Apple Maps Search Error: \(error)")
             searchResults = []
             isSearching = false
         }
@@ -85,31 +83,6 @@ final class LocationManager: NSObject {
 
     func clearSearch() {
         searchResults = []
-    }
-}
-
-// MARK: - Google API Models
-struct GooglePredictionsResponse: Codable {
-    let predictions: [GooglePrediction]
-    
-    struct GooglePrediction: Codable {
-        let placeId: String
-        let structuredFormatting: StructuredFormatting
-        
-        enum CodingKeys: String, CodingKey {
-            case placeId = "place_id"
-            case structuredFormatting = "structured_formatting"
-        }
-    }
-    
-    struct StructuredFormatting: Codable {
-        let mainText: String
-        let secondaryText: String?
-        
-        enum CodingKeys: String, CodingKey {
-            case mainText = "main_text"
-            case secondaryText = "secondary_text"
-        }
     }
 }
 

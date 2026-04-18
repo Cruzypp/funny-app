@@ -10,6 +10,7 @@ struct ScreenNav: View {
     @State private var sosProgress: Double = 0
     @State private var sosPressing = false
     @State private var pulseScale: CGFloat = 1.0
+    @State private var showSOSOptions = false
     @State private var cameraPosition: MapCameraPosition = .userLocation(
         fallback: .region(MKCoordinateRegion(
             center: CLLocationCoordinate2D(latitude: 19.4130, longitude: -99.1650),
@@ -201,37 +202,62 @@ struct ScreenNav: View {
             .padding(.bottom, 16)
 
             HStack(spacing: 10) {
-                Button {
-                    withAnimation { sharing.toggle() }
-                } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: "square.and.arrow.up")
-                            .font(.system(size: 17, weight: .medium))
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(sharing ? "Compartiendo" : "Compartir")
-                                .font(.system(size: 13, weight: .semibold))
-                            Text(sharing ? "Mamá · Sofía · Diego" : "con contactos")
-                                .font(.system(size: 10))
-                                .opacity(0.75)
+                // Compartir ubicación real
+                if let loc = router.location.userLocation {
+                    ShareLink(item: "Mi ubicación en Caminos: https://maps.apple.com/?ll=\(loc.coordinate.latitude),\(loc.coordinate.longitude)") {
+                        HStack(spacing: 10) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 17, weight: .medium))
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("Compartir")
+                                    .font(.system(size: 13, weight: .semibold))
+                                Text("Vía enlace")
+                                    .font(.system(size: 10))
+                                    .opacity(0.75)
+                            }
                         }
+                        .foregroundStyle(T.pri(night))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(height: 56)
+                        .padding(.horizontal, 14)
+                        .background(night ? Color.white.opacity(0.06) : Color.black.opacity(0.04),
+                                    in: RoundedRectangle(cornerRadius: 18))
                     }
-                    .foregroundStyle(sharing ? T.safe : T.pri(night))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .frame(height: 56)
-                    .padding(.horizontal, 14)
-                    .background(
-                        sharing
-                            ? (night ? T.safe.opacity(0.25) : T.safeTint)
-                            : (night ? Color.white.opacity(0.06) : Color.black.opacity(0.04)),
-                        in: RoundedRectangle(cornerRadius: 18)
-                    )
+                } else {
+                    Button(action: { }) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "square.and.arrow.up")
+                                .font(.system(size: 17, weight: .medium))
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("Compartir")
+                                    .font(.system(size: 13, weight: .semibold))
+                                Text("Sin señal GPS")
+                                    .font(.system(size: 10))
+                                    .opacity(0.75)
+                            }
+                        }
+                        .foregroundStyle(T.sec(night))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .frame(height: 56)
+                        .padding(.horizontal, 14)
+                        .background(night ? Color.white.opacity(0.06) : Color.black.opacity(0.04),
+                                    in: RoundedRectangle(cornerRadius: 18))
+                    }
                 }
-                .buttonStyle(.plain)
 
                 sosButton
                     .frame(width: 56, height: 56)
+                    .onChange(of: sosProgress) { _, newValue in
+                        if newValue >= 1.0 {
+                            triggerEmergency()
+                        }
+                    }
             }
             .padding(.horizontal, 20)
+            .sheet(isPresented: $showSOSOptions) {
+                EmergencySheet()
+                    .presentationDetents([.medium, .large])
+            }
 
             Text("Mantén presionado SOS por 3s para emergencia")
                 .font(.system(size: 11))
@@ -302,6 +328,12 @@ struct ScreenNav: View {
             if progress >= 1.0 { t.invalidate(); return }
             progress = min(1.0, progress + 0.002)
         }
+    }
+
+    private func triggerEmergency() {
+        showSOSOptions = true
+        sosProgress = 0
+        sosPressing = false
     }
 }
 

@@ -5,12 +5,7 @@ struct ScreenHome: View {
     @Environment(AppRouter.self) var router
     @State private var query = ""
     @State private var showResults = false
-
-    private let contacts: [TrustedContact] = [
-        .init(name: "Mamá",  color: Color(hex: "E07856")),
-        .init(name: "Sofía", color: Color(hex: "2E7D5B")),
-        .init(name: "Diego", color: Color(hex: "3A5998")),
-    ]
+    @State private var showContactPicker = false
 
     private let recents: [RecentDestination] = [
         .init(sfSymbol: "house.fill",      title: "Casa",              subtitle: "Col. Roma Norte",    safety: .high),
@@ -79,6 +74,11 @@ struct ScreenHome: View {
         .ignoresSafeArea(edges: .bottom)
         .onAppear {
             location.requestPermission()
+        }
+        .sheet(isPresented: $showContactPicker) {
+            ContactPicker { newContact in
+                router.addContact(newContact)
+            }
         }
         .onChange(of: query) { _, newValue in
             showResults = !newValue.isEmpty
@@ -295,7 +295,7 @@ struct ScreenHome: View {
             }
 
             HStack(spacing: 10) {
-                ForEach(contacts, id: \.name) { c in
+                ForEach(router.contacts) { c in
                     ZStack(alignment: .bottomTrailing) {
                         Circle()
                             .fill(c.color)
@@ -315,14 +315,19 @@ struct ScreenHome: View {
                 }
 
                 // Add button
-                Circle()
-                    .stroke(T.line(night), lineWidth: 1.5)
-                    .frame(width: 52, height: 52)
-                    .overlay(
-                        Image(systemName: "plus")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(T.sec(night))
-                    )
+                Button {
+                    showContactPicker = true
+                } label: {
+                    Circle()
+                        .stroke(T.line(night), lineWidth: 1.5)
+                        .frame(width: 52, height: 52)
+                        .overlay(
+                            Image(systemName: "plus")
+                                .font(.system(size: 16, weight: .medium))
+                                .foregroundStyle(T.sec(night))
+                        )
+                }
+                .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, 20)
